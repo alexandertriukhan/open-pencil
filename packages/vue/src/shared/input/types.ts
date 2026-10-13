@@ -9,6 +9,7 @@ import type {
   TextPathData,
   VectorNetwork
 } from '@open-pencil/scene-graph'
+import type { SelectionFrame, SelectionPlacement } from '@open-pencil/scene-graph/coordinate'
 import type { Rect, Vector } from '@open-pencil/scene-graph/primitives'
 import type { ResizeSnapshot } from '@open-pencil/scene-graph/resize'
 
@@ -168,6 +169,27 @@ export interface DragResize {
   appliedSizing?: LayerSizing
 }
 
+/**
+ * A resize of a multi-selection from its bounds' handles, as Figma scales every selected layer:
+ * one layer resize per member, each re-placed in the resized bounds and committed as one step.
+ */
+export interface DragResizeSelection {
+  type: 'resize-selection'
+  handle: HandlePosition
+  startX: number
+  startY: number
+  /** The selection's box in its frame when the drag started. */
+  origBounds: Rect
+  /** The frame's angle from the canvas, along whose axes the selection resizes. */
+  angle: number
+  members: DragResizeMember[]
+}
+
+export interface DragResizeMember {
+  drag: DragResize
+  placement: SelectionPlacement
+}
+
 export interface DragMarquee {
   type: 'marquee'
   startX: number
@@ -186,6 +208,20 @@ export interface DragRotate {
   startAngle: number
   origRotation: number
   rotationDirection: 1 | -1
+}
+
+/**
+ * A rotation of a multi-selection about its bounds' center, as Figma turns a selection: every
+ * selected layer swings around the center and turns by the same angle.
+ */
+export interface DragRotateSelection {
+  type: 'rotate-selection'
+  centerX: number
+  centerY: number
+  startAngle: number
+  /** The selection's frame when the rotation started. */
+  frame: SelectionFrame
+  members: Array<{ nodeId: string; placement: SelectionPlacement }>
 }
 
 export interface DragPen {
@@ -302,8 +338,10 @@ export type DragState =
   | DragPan
   | DragResize
   | DragStickyScale
+  | DragResizeSelection
   | DragMarquee
   | DragRotate
+  | DragRotateSelection
   | DragPen
   | DragPencil
   | DragTextSelect

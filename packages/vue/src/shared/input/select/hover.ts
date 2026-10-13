@@ -4,18 +4,25 @@ import { layerResizes, layerRotates } from '@open-pencil/scene-graph/generated'
 import { connectorLineCursor } from '#vue/shared/input/connector/line'
 import {
   MOVE_CURSOR,
+  axisAlignedCursorAngle,
   buildResizeCursor,
   cornerRotationCursor,
+  frameRotationCursor,
   getHitHandleByMatrix,
   hitTestCornerRotationByMatrix
 } from '#vue/shared/input/geometry'
 import { lineEndAt } from '#vue/shared/input/line/end'
+import { selectionBox, selectionResizeHandleAt } from '#vue/shared/input/resize/selection'
 import type { HitTestFns } from '#vue/shared/input/select'
 import { hitTestLabel } from '#vue/shared/input/select/hit'
 import { pressSelects } from '#vue/shared/input/select/move'
 import { scalesByHandles } from '#vue/shared/input/sticky/scale'
 
 function getResizeCursorForSelection(cx: number, cy: number, editor: Editor): string | null {
+  if (editor.state.selectedIds.size > 1) {
+    const hit = selectionResizeHandleAt(cx, cy, editor)
+    return hit ? buildResizeCursor(axisAlignedCursorAngle(hit.handle) + hit.angle) : null
+  }
   for (const id of editor.state.selectedIds) {
     const node = editor.graph.getNode(id)
     // As a press does: only a layer its handles resize or scale shows a resize cursor on them.
@@ -35,6 +42,10 @@ function getResizeCursorForSelection(cx: number, cy: number, editor: Editor): st
 }
 
 function getRotationCursorForSelection(cx: number, cy: number, editor: Editor): string | null {
+  if (editor.state.selectedIds.size > 1) {
+    const frame = selectionBox(editor)
+    return frame ? frameRotationCursor(cx, cy, frame, editor.renderer?.zoom ?? 1) : null
+  }
   if (editor.state.selectedIds.size !== 1) return null
 
   const id = [...editor.state.selectedIds][0]

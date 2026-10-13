@@ -187,3 +187,30 @@ describe('resizing an instance', () => {
     }
   })
 })
+
+describe('resizing a layer inside a group', () => {
+  test('the group fits its children again, and one undo puts both back', () => {
+    const editor = createEditor()
+    try {
+      const page = editor.state.currentPageId
+      const group = editor.graph.createNode('GROUP', page, { x: 0, y: 0, width: 150, height: 50 })
+      editor.graph.createNode('RECTANGLE', group.id, { x: 0, y: 0, width: 50, height: 50 })
+      const child = editor.graph.createNode('RECTANGLE', group.id, {
+        x: 100,
+        y: 0,
+        width: 50,
+        height: 50
+      })
+      const d = { ...drag(child), startX: 150, startY: 25 }
+      applyResize(d, 250, 25, false, editor)
+      commitResizePreview(d, editor)
+      expect(editor.graph.getNode(group.id)?.width).toBe(250)
+
+      editor.undo.undo()
+      expect(editor.graph.getNode(group.id)?.width).toBe(150)
+      expect(editor.graph.getNode(child.id)?.width).toBe(50)
+    } finally {
+      editor.dispose()
+    }
+  })
+})

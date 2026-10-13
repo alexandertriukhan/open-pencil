@@ -19,6 +19,7 @@ import {
   type InstanceOverrideState
 } from '@open-pencil/scene-graph/instances/overrides'
 import { recapturedAspectRatio } from '@open-pencil/scene-graph/layout'
+import { FITTED_CONTAINER_TYPES } from '@open-pencil/scene-graph/node-defaults'
 import type { Rect } from '@open-pencil/scene-graph/primitives'
 import {
   computeConstrainedResizeChanges,
@@ -112,8 +113,16 @@ function resizeChanges(
     aspect !== null
       ? proportionalResizeRect(d, origRect, dx, dy, aspect, editor, ctrlKey)
       : applyResizeSnap(d, calculateResizeRect(d.handle, origRect, dx, dy, null), editor, ctrlKey)
+  return { changes: scaledChanges(d, type, newRect), newRect }
+}
 
-  const changes: Partial<SceneNode> = {
+/** The layer's box and its own geometry scaled from the drag's start to `newRect`. */
+export function scaledChanges(
+  d: DragResize,
+  type: SceneNode['type'],
+  newRect: Rect
+): Partial<SceneNode> {
+  return {
     ...newRect,
     ...scaledGeometryChanges(
       {
@@ -126,13 +135,12 @@ function resizeChanges(
         textPathData: d.origTextPathData,
         textPathBox: d.origTextPathBox
       },
-      origRect.width,
-      origRect.height,
+      d.origRect.width,
+      d.origRect.height,
       newRect.width,
       newRect.height
     )
   }
-  return { changes, newRect }
 }
 
 /**
@@ -189,6 +197,21 @@ export function applyResize(
   const node = editor.graph.getNode(d.nodeId)
   if (!node) return
   const { changes, newRect } = resizeChanges(d, node.type, cx, cy, shiftKey, editor, ctrlKey)
+  applyResizedRect(d, node, newRect, changes, editor)
+  editor.requestRepaint()
+}
+
+/**
+ * Previews a layer resized to `newRect`: its box and geometry (`changes`), its sizing, path text
+ * and constrained children, laid out around it. The caller requests the repaint.
+ */
+export function applyResizedRect(
+  d: DragResize,
+  node: SceneNode,
+  newRect: Rect,
+  changes: Partial<SceneNode>,
+  editor: Editor
+) {
   d.appliedRect = { ...newRect }
   d.origSizing ??= layerSizing(node)
   d.appliedSizing = draggedSizing(editor.graph, node, d.origSizing, d.origRect, newRect)
@@ -219,7 +242,6 @@ export function applyResize(
   editor.graph.runPreviewUpdates(() => computeAllLayouts(editor.graph, d.nodeId))
   applyConstrainedChildren(d, newRect, editor)
   editor.graph.runPreviewUpdates(() => computeAllLayouts(editor.graph, d.nodeId))
-  editor.requestRepaint()
 }
 
 /**
@@ -340,10 +362,19 @@ export function cancelResizePreview(dragState: DragResize, editor: Editor) {
   editor.requestRender()
 }
 
-export function commitResizePreview(dragState: DragResize, editor: Editor) {
+/**
+ * Commits a resize as one undo step. Groups and booleans around the layer fit their children
+ * again, as after a move, unless `fitGroups` is false because the caller fits them itself.
+ */
+export function commitResizePreview(
+  dragState: DragResize,
+  editor: Editor,
+  { fitGroups = true }: { fitGroups?: boolean } = {}
+) {
   // See applyResize — reactive drag state must not leak into graph writes.
   const d = toRaw(dragState)
   const node = editor.graph.getNode(d.nodeId)
+  const parentId = node?.parentId
   // A section resized over layers takes in the ones it now covers, a lock that Control set aside
   // takes the new size, and an axis that stopped hugging or filling stays fixed, in one undo step.
   const adoptsLayers = node?.type === 'SECTION'
@@ -352,7 +383,13 @@ export function commitResizePreview(dragState: DragResize, editor: Editor) {
     d.origSizing !== undefined &&
     d.appliedSizing !== undefined &&
     !isEqual(d.origSizing, d.appliedSizing)
-  if (!adoptsLayers && !recaptured.targetAspectRatio && !fixesSizing) {
+  // Only a layer inside a group or boolean has bounds around it to fit again.
+  const parent = parentId ? editor.graph.getNode(parentId) : undefined
+  const fitsGroups = fitGroups && parent !== undefined && FITTED_CONTAINER_TYPES.has(parent.type)
+  const fitEnclosingGroups = () => {
+    if (fitsGroups && parentId) editor.fitEnclosingGroups([parentId])
+  }
+  if (!adoptsLayers && !recaptured.targetAspectRatio && !fixesSizing && !fitsGroups) {
     commitResizeGeometry(d, editor)
     return
   }
@@ -365,6 +402,7 @@ export function commitResizePreview(dragState: DragResize, editor: Editor) {
     commitResizeGeometry(d, editor)
     if (recaptured.targetAspectRatio) editor.updateNodeWithUndo(d.nodeId, recaptured, 'Resize')
     if (adoptsLayers) editor.adoptCoveredLayers(d.nodeId)
+    fitEnclosingGroups()
   })
 }
 
