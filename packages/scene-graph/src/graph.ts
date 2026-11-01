@@ -24,6 +24,7 @@ import Matrix from './matrix'
 import { CONTAINER_TYPES, createDefaultNode } from './node-defaults'
 import { updateNodePreview, type NodePreviewObserver } from './preview'
 import type { Color, Rect, Vector } from './primitives'
+import { SharedStyleIndex } from './shared-style-index'
 import { markSourceFieldsEdited } from './source-metadata'
 import { invalidateTextCaches } from './text/picture'
 import type {
@@ -34,6 +35,7 @@ import type {
   NodeType,
   SceneGraphEventHandlers,
   SceneNode,
+  SharedStyleType,
   Variable,
   VariableCollection,
   VariableType,
@@ -77,6 +79,7 @@ export class SceneGraph {
   instanceIndex = new Map<string, Set<string>>()
   /** Every connector in the graph, so routing need not scan every layer. */
   connectorIds = new Set<string>()
+  readonly sharedStyleIndex = new SharedStyleIndex(() => this.nodes)
 
   constructor(private readonly idGenerator: () => string = generateId) {
     const root = createDefaultNode(this.idGenerator, 'FRAME', {
@@ -393,6 +396,7 @@ export class SceneGraph {
     node.parentId = parentId
     this.nodes.set(node.id, node)
     if (node.type === 'CONNECTOR') this.connectorIds.add(node.id)
+    this.sharedStyleIndex.added(node)
     for (const observer of this.changeObservers) observer.created(node)
     if (node.type === 'INSTANCE' && node.componentId) this.indexInstance(node.componentId, node.id)
     this.emitter.emit('node:created', node)
@@ -536,6 +540,14 @@ export class SceneGraph {
     this.applyNodeChanges(node, this.sizedChanges(node, omitBy(changes, isUndefined)))
   }
 
+  getSharedStyleNode(styleId: string, type: SharedStyleType): SceneNode | undefined {
+    return this.sharedStyleIndex.styleNode(styleId, type)
+  }
+
+  private styleIndexWillChange(node: SceneNode, changes: Partial<SceneNode>): boolean {
+    return !this.isApplyingLayout && this.sharedStyleIndex.willChange(node, changes)
+  }
+
   /** A size set from outside layout, with what it also sets on a generated frame. */
   private sizedChanges(node: SceneNode, changes: Partial<SceneNode>): Partial<SceneNode> {
     return this.isApplyingLayout ? changes : withGeneratedFrameSize(node, changes)
@@ -586,10 +598,12 @@ export class SceneGraph {
       changes,
       this.scopeDepths.sourceMetadata === 0 && !this.isApplyingDerivedLayout
     )
+    const restyled = this.styleIndexWillChange(node, changes)
     Object.assign(node, changes)
     if (changes.fills) removeStaleBindings(node, 'fills', changes)
     if (changes.strokes) removeStaleBindings(node, 'strokes', changes)
     for (const key of absent) Reflect.deleteProperty(node, key)
+    this.sharedStyleIndex.didChange(node, restyled)
     this.publishNodeUpdate(id, changes)
   }
 
@@ -693,6 +707,7 @@ export class SceneGraph {
 
     if (node.type === 'INSTANCE' && node.componentId) this.unindexInstance(node.componentId, id)
     this.connectorIds.delete(id)
+    this.sharedStyleIndex.removed(node)
     this.nodes.delete(id)
     this.emitter.emit('node:deleted', id, node.parentId)
   }
