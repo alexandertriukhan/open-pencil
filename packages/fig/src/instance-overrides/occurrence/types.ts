@@ -32,6 +32,7 @@ export interface InstanceOccurrence {
    * drawn. Saved derived outlines are already at the placed size and replace the inherited ones.
    */
   inheritedOutlineScale?: { fill: Vector; stroke: Vector }
+  derivedPosition?: boolean
   /** Cumulative scale for unresolved layout-distance variable values. */
   layoutScale?: number
   /** Per-field declaration-space multipliers, composed as owners expand. */
