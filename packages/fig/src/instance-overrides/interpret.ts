@@ -49,6 +49,7 @@ import {
   terminalComponent,
   type InterpreterIndex
 } from './source-index'
+import { laidOutAround, placedRootRecord } from './swapped-root'
 import { invalidateInheritedTextData } from './text-provenance'
 import {
   assignedSlotContent,
@@ -390,15 +391,27 @@ function interpretRoot(
       } else {
         subtree = expandChildren(id, source, bindings, root.groups, root.descendant, rank, modes)
       }
-      const occurrence = createOccurrence(id, raw, source, root, subtree, record.claims)
+      const expandedComponent = subtree.base ? root.effective : undefined
+      const placed = placedRootRecord(source, raw, expandedComponent, sources)
+      const occurrence = createOccurrence(id, raw, placed, root, subtree, record.claims)
       if (record.slotContent) occurrence.slotContentId = record.slotContent
       assignedFields.set(occurrence, record.bound)
       if (subtree.base && root.replaced.length) replacedComponents.set(occurrence, root.replaced)
-      declareSourceVariableBindingUnits(occurrence, source)
+      declareSourceVariableBindingUnits(occurrence, placed)
       const claims = subtree.dangling
         ? own.claims.filter(({ path }) => path.length === 1 && isRootGuid(occurrence, path[0]))
         : own.claims
-      finishOccurrence(occurrence, subtree.base, source, claims, rank, !subtree.dangling, modes)
+      const pinsSize = laidOutAround(source, expandedComponent)
+      finishOccurrence(
+        occurrence,
+        subtree.base,
+        placed,
+        claims,
+        rank,
+        !subtree.dangling,
+        modes,
+        pinsSize
+      )
       for (const diagnostic of owner.unresolved)
         options.onUnresolvedAssignment?.({
           ...diagnostic,
@@ -539,11 +552,6 @@ function interpretRoot(
   ): InstanceOccurrence => {
     const original = raw.symbolData?.symbolID
     const [, sourceComponentOverrideKey] = componentKeys(original)
-    // A swapped root draws the replacement's paint, so the old paint's style link goes with it.
-    const placed =
-      base && effective && !sameGuid(original, effective) && source.type === 'INSTANCE'
-        ? omit(source, ['fillPaints', 'styleIdForFill'])
-        : source
     const occurrence: InstanceOccurrence = {
       sourceId: id,
       sourceComponentId: original,
@@ -555,7 +563,7 @@ function interpretRoot(
       properties: {
         // The component's look carries over; its identity does not.
         ...(base && omit(base.properties, COMPONENT_IDENTITY_FIELDS)),
-        ...placed,
+        ...source,
         ...(effective && source.symbolData
           ? { symbolData: { ...source.symbolData, symbolID: effective } }
           : {}),
@@ -583,7 +591,8 @@ function interpretRoot(
     claims: readonly PropertyLayer[],
     rank: number,
     derived: boolean,
-    modes: ModeScope
+    modes: ModeScope,
+    pinsSize: boolean
   ): void => {
     for (const claim of claims) {
       const target = resolveClaimTarget(occurrence, claim.path)
@@ -591,7 +600,7 @@ function interpretRoot(
     }
     applyInstanceLayoutScale(occurrence, source)
     applyPlacedConstraints(occurrence, base, source)
-    modeScopes.applySavedSize(occurrence, source, modes)
+    modeScopes.applySavedSize(occurrence, source, modes, pinsSize)
     if (derived) applyDerivedBounds(occurrence, source)
   }
 

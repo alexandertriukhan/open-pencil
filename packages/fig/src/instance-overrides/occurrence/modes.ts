@@ -201,7 +201,12 @@ export function createModeScopes(index: InterpreterIndex) {
         expandedComponent
       }
     },
-    applySavedSize(occurrence: InstanceOccurrence, source: NodeChange, scope: ModeScope): void {
+    applySavedSize(
+      occurrence: InstanceOccurrence,
+      source: NodeChange,
+      scope: ModeScope,
+      pinsSize: boolean
+    ): void {
       if (source.type !== 'INSTANCE' || !source.size) {
         return
       }
@@ -209,7 +214,7 @@ export function createModeScopes(index: InterpreterIndex) {
       // The size the file keeps for the instance is its own content laid out, such as a hug
       // frame around longer text than its component's, which a sync with the component must
       // not replace.
-      if (!differsFromDocument(scope, source, occurrence.sourceId)) {
+      if (pinsSize && !differsFromDocument(scope, source, occurrence.sourceId)) {
         occurrence.derivedSize = structuredClone(source.size)
       }
     }
