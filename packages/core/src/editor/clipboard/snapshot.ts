@@ -1,6 +1,5 @@
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import { referencedStyleIds } from '@open-pencil/scene-graph/shared-styles'
-import { styleRunReferences } from '@open-pencil/scene-graph/text'
 import { savedVariantIds } from '@open-pencil/scene-graph/variables'
 
 import { clipboardPlacement, type ClipboardPlacement } from './placement'

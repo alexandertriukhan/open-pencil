@@ -2,6 +2,7 @@ import type { Canvas, Shader } from 'canvaskit-wasm'
 
 import type { Fill, SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import { createPatternSourceLookup } from '@open-pencil/scene-graph/paints'
+import { regionFills } from '@open-pencil/scene-graph/vector-network'
 
 import type { SkiaRenderer } from '#core/canvas/renderer'
 import { withWorldViewport } from '#core/canvas/renderer/picture'
@@ -21,19 +22,13 @@ export type DrawSourceFills = (
 function hasVisibleOwnFill(source: SceneNode): boolean {
   return (
     source.fills.some((fill) => fill.visible) ||
-    source.fillGeometry.some((geometry) => geometry.fills?.some((fill) => fill.visible))
+    regionFills(source.vectorNetwork).some((fill) => fill.visible)
   )
 }
 
 function drawSourceLayer(r: SkiaRenderer, canvas: Canvas, source: SceneNode, graph: SceneGraph) {
   canvas.translate(-source.x, -source.y)
-  const sceneBacking = r.renderingSceneBacking
-  r.renderingSceneBacking = false
-  try {
-    withWorldViewport(r, UNBOUNDED_VIEWPORT, () => r.renderNode(canvas, graph, source.id, {}))
-  } finally {
-    r.renderingSceneBacking = sceneBacking
-  }
+  withWorldViewport(r, UNBOUNDED_VIEWPORT, () => r.renderNode(canvas, graph, source.id, {}))
 }
 
 function recordPatternTile(
