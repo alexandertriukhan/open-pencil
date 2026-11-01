@@ -1,4 +1,5 @@
 import { disposeNodeEditPaints } from '#core/canvas/node-edit-overlay'
+import { clearPatternTiles } from '#core/canvas/patterns/tiles'
 import type { SkiaRenderer } from '#core/canvas/renderer'
 import { fontManager } from '#core/text/font/manager'
 
@@ -72,6 +73,7 @@ export function destroyRenderer(r: SkiaRenderer): void {
   r.issueMarkerStage.clear()
   r.labelParagraphCache.clear()
   r.textPreparationCache.clear()
+  clearPatternTiles(r)
   r.tiledScene.destroy()
   r.wholeScene.picture?.delete()
   r.profiler.destroy()

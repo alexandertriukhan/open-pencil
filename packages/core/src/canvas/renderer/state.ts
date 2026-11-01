@@ -2,6 +2,7 @@ import type { SkPicture } from 'canvaskit-wasm'
 
 import type { SceneNode } from '@open-pencil/scene-graph'
 
+import { clearPatternTiles, invalidatePatternTargets } from '#core/canvas/patterns/tiles'
 import type { SkiaRenderer } from '#core/canvas/renderer'
 import { changesShaping } from '#core/canvas/text/paragraph/inputs'
 
@@ -64,6 +65,7 @@ export function invalidateAllPictures(r: SkiaRenderer): void {
   invalidateScenePicture(r)
   r.tiledScene.invalidateStructure()
   clearNodePictures(r)
+  clearPatternTiles(r)
 }
 
 export function invalidateNodePicture(
@@ -75,6 +77,7 @@ export function invalidateNodePicture(
     keepShaping: changedKeys !== undefined && !changesShaping(changedKeys)
   })
   r.textFonts.readiness.delete(nodeId)
+  invalidatePatternTargets(r, nodeId)
   const cached = r.nodePictures.get(nodeId)
   if (cached) {
     cached.picture.delete()
