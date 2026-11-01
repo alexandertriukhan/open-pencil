@@ -14,6 +14,7 @@ import { createDefaultSourceMetadata } from '@open-pencil/scene-graph/node-defau
 import { nodeChangeToProps } from '../node-change'
 import { numericVariableBindingScales } from '../node-change/variable/bindings'
 import { variableModeLayer } from '../node-change/variable/maps'
+import { setsVariantBindings } from '../node-change/variable/variants'
 import {
   recordVariableBindingClaims,
   occurrenceAssignmentScales,
@@ -366,6 +367,9 @@ function recordPropertyClaims(nodes: ReadonlyMap<InstanceOccurrence, SceneNode>)
       }
       recordVariableBindingClaims(owner, target, claim.properties)
       recordVariableModeClaims(owner, target, claim.properties)
+      if (claim.declaredBy === ownerOccurrence.sourceId && setsVariantBindings(claim.properties)) {
+        setInstanceOverride(owner.instanceOverrides, owner.id, target.id, 'variantBindings')
+      }
     }
   }
 }

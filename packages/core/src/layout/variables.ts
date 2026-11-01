@@ -7,12 +7,20 @@ import {
 import { computeLayout, computeSubtreeLayouts } from '#core/layout'
 import { textAutoResizeChanges } from '#core/layout/text-auto-resize'
 
+import { measurePropertyText } from './property-text'
+
 /**
  * Binding evaluation is derived work, not an additional history entry. The scope names what
  * changed, so only the layers that change can reach are resolved and laid out again.
  */
 export function reconcileVariableLayouts(graph: SceneGraph, scope: BindingScope): void {
-  const updates = reconcileVariableBindingUpdates(graph, scope)
+  const updates = reconcileVariableBindingUpdates(graph, scope, {
+    onVariantSwap: (instanceId, reapplied) => {
+      for (const definition of reapplied) {
+        measurePropertyText(graph, instanceId, definition)
+      }
+    }
+  })
   if (updates.size === 0) {
     return
   }

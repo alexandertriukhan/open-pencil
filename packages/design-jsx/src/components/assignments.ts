@@ -8,6 +8,7 @@ import {
   exposedInstances
 } from '@open-pencil/scene-graph/components'
 import { instanceMainComponent } from '@open-pencil/scene-graph/instances'
+import { unbindSwapPropertyTargets } from '@open-pencil/scene-graph/variables'
 
 import { DESIGN_JSX_SUPPORTED_PROPERTIES } from '../definitions'
 import { isLayerRef, type LayerRef } from '../refs'
@@ -45,6 +46,7 @@ function assignValue(
       throw new Error(`A ref() names a component, for a swap property, not ${key}`)
     const id = componentId(value)
     if (!id) throw new Error(`${key} names a ref() that marks no component rendered before it`)
+    unbindSwapPropertyTargets(graph, instance.id, definition, id)
     if (!applyComponentPropertyValue(graph, instance.id, definition, id))
       throw new Error(`Cannot assign component property: ${key}`)
     return
@@ -55,6 +57,7 @@ function assignValue(
     throw new Error(`Expected true or false for component property: ${key}`)
   // A swap names its component as `of` does: by ID or by name.
   const assigned = definition.type === 'INSTANCE_SWAP' ? (componentId(value) ?? value) : value
+  unbindSwapPropertyTargets(graph, instance.id, definition, assigned)
   if (!applyComponentPropertyValue(graph, instance.id, definition, assigned))
     throw new Error(`Cannot assign component property: ${key}`)
 }

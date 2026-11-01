@@ -28,6 +28,23 @@ import {
 } from './style-bindings'
 import { variableText, variableTruthy } from './text'
 import { variableValueReferences } from './value'
+import { hasVariantBindings } from './variant-bindings'
+import {
+  boundInstancesFirst,
+  createVariantWalk,
+  subtreeNodes,
+  walkBoundVariants,
+  type ReconcileOptions
+} from './variant-reconcile'
+export type { ReconcileOptions } from './variant-reconcile'
+export {
+  savedVariantIds,
+  savedVariantUnderBinding,
+  unbindSwapPropertyTargets,
+  unbindVariantProperty,
+  unbindVariantsForSwap
+} from './variant-bindings'
+export { showBoundVariants } from './variant-reconcile'
 export {
   isNumericVariableBindingField,
   paintBindingTarget,
@@ -188,12 +205,16 @@ export function resolvedTextStyleBindings(
   }
 }
 
-/** The variables a node binds, its own, its characters', and those its text styles bind. */
+/** The variables a node binds: its own, its characters', its text styles' and its variants'. */
 function boundVariableIds(node: SceneNode, styles: TextStyleLookup): string[] {
-  return [
+  const ids = [
     ...Object.values(effectiveBoundVariables(node, styles)),
     ...node.styleRuns.flatMap((run) => Object.values(effectiveRunBoundVariables(run, styles)))
-  ].filter((id): id is string => typeof id === 'string')
+  ]
+  if (hasVariantBindings(node)) {
+    ids.push(...Object.values(node.variantBindings))
+  }
+  return ids.filter((id): id is string => typeof id === 'string')
 }
 
 /**
@@ -259,18 +280,6 @@ export function variablesResolvingThrough(graph: SceneGraph, ids: Iterable<strin
   return found
 }
 
-function subtreeNodes(graph: SceneGraph, roots: Iterable<string>): SceneNode[] {
-  const nodes: SceneNode[] = []
-  const pending = [...roots]
-  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
-    const node = graph.getNode(id)
-    if (!node) continue
-    nodes.push(node)
-    pending.push(...node.childIds)
-  }
-  return nodes
-}
-
 /**
  * The collections whose variables the layers in these subtrees resolve: those they bind, and
  * those the bound variables alias, so a mode set on the subtrees can change what they show.
@@ -314,13 +323,17 @@ interface ScopedLayers {
 
 const NO_RESTYLED: ReadonlySet<string> = new Set()
 
+function allNodes(graph: SceneGraph): Iterable<SceneNode> {
+  return { [Symbol.iterator]: () => graph.getAllNodes()[Symbol.iterator]() }
+}
+
 function scopedLayers(
   graph: SceneGraph,
   scope: BindingScope | undefined,
   styles: TextStyleLookup
 ): ScopedLayers {
   if (!scope) {
-    return { nodes: graph.getAllNodes(), restyled: NO_RESTYLED }
+    return { nodes: allNodes(graph), restyled: NO_RESTYLED }
   }
   if ('subtrees' in scope) {
     return withTextStyleConsumers(graph, subtreeNodes(graph, scope.subtrees))
@@ -438,42 +451,63 @@ function resolvedOwnBindings(
   }
 }
 
+function applyResolvedBindings(
+  graph: SceneGraph,
+  node: SceneNode,
+  styles: TextStyleLookup,
+  restyled: ReadonlySet<string>,
+  updates: Map<string, Partial<SceneNode>>
+): boolean {
+  if (!readsVariables(node)) {
+    return false
+  }
+  const unbound = styleOwnValues(graph, node, restyled, styles)
+  if (!isEmptyObject(unbound)) {
+    graph.updateNode(node.id, unbound)
+  }
+  const resolved = {
+    ...resolvedNumbers(graph, node, inheritedTextStyleBindings(node, styles), 'active'),
+    ...resolvedOwnBindings(graph, node, styles)
+  }
+  if (isEmptyObject(unbound) && isEmptyObject(resolved)) {
+    return false
+  }
+  if (!isEmptyObject(resolved)) {
+    graph.updateNode(node.id, resolved)
+  }
+  updates.set(node.id, { ...updates.get(node.id), ...unbound, ...resolved })
+  return true
+}
+
 /**
  * Resolve live numeric, text, and visibility bindings, numbers in scene units, without authoring
  * instance overrides. A scope limits it to the layers a change can reach, so layers whose saved
  * values differ from their bindings elsewhere in the document are left as saved.
  */
-export function reconcileVariableBindings(graph: SceneGraph, scope?: BindingScope): string[] {
-  return [...reconcileVariableBindingUpdates(graph, scope).keys()]
+export function reconcileVariableBindings(
+  graph: SceneGraph,
+  scope?: BindingScope,
+  options: ReconcileOptions = {}
+): string[] {
+  return [...reconcileVariableBindingUpdates(graph, scope, options).keys()]
 }
 
 /** As `reconcileVariableBindings`, with the fields each changed layer received. */
 export function reconcileVariableBindingUpdates(
   graph: SceneGraph,
-  scope?: BindingScope
+  scope?: BindingScope,
+  { onVariantSwap }: ReconcileOptions = {}
 ): Map<string, Partial<SceneNode>> {
-  const changed = new Map<string, Partial<SceneNode>>()
+  const updates = new Map<string, Partial<SceneNode>>()
+  const changed: string[] = []
   const styles = createTextStyleLookup(graph)
   const { nodes, restyled } = scopedLayers(graph, scope, styles)
-  for (const node of nodes) {
-    if (!readsVariables(node)) {
-      continue
-    }
-    const unbound = styleOwnValues(graph, node, restyled, styles)
-    if (!isEmptyObject(unbound)) {
-      graph.updateNode(node.id, unbound)
-    }
-    const resolved = {
-      ...resolvedNumbers(graph, node, inheritedTextStyleBindings(node, styles), 'active'),
-      ...resolvedOwnBindings(graph, node, styles)
-    }
-    if (isEmptyObject(unbound) && isEmptyObject(resolved)) {
-      continue
-    }
-    if (!isEmptyObject(resolved)) {
-      graph.updateNode(node.id, resolved)
-    }
-    changed.set(node.id, { ...unbound, ...resolved })
-  }
-  return changed
+  walkBoundVariants(
+    graph,
+    boundInstancesFirst(graph, nodes),
+    createVariantWalk(graph, { onVariantSwap }),
+    (node) => applyResolvedBindings(graph, node, styles, restyled, updates),
+    changed
+  )
+  return new Map(changed.map((id) => [id, updates.get(id) ?? {}]))
 }
