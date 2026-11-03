@@ -46,29 +46,55 @@ export function rangeSharedStylePatch(
   if (!styleId) return { [key]: null }
   const style = findSharedStyle(graph, styleId, kind === 'text' ? 'TEXT' : 'FILL')
   if (!style) return null
-  if (kind === 'fill') return { fillStyleId: styleId, fills: copyFills(style.fills) }
-  return {
-    textStyleId: styleId,
-    ...structuredClone(pick(style, SHARED_TEXT_STYLE_FIELDS)),
-    ...styleBoundValues(graph, node, style)
+  return sharedStyleRangePatcher(graph, kind, styleId, style)(node)
+}
+
+export function sharedStyleRangePatcher(
+  graph: SceneGraph,
+  kind: 'text' | 'fill',
+  styleId: string,
+  style: SceneNode
+): (node: SceneNode) => CharacterStyleOverride {
+  if (kind === 'fill') {
+    const fillPatch = { fillStyleId: styleId, fills: copyFills(style.fills) }
+    return () => ({ ...fillPatch })
   }
+  const textPatch = {
+    textStyleId: styleId,
+    ...structuredClone(pick(style, SHARED_TEXT_STYLE_FIELDS))
+  }
+  const bound = styleBoundVariables(graph, style)
+  if (bound.length === 0) {
+    return () => ({ ...textPatch })
+  }
+  return (node) => ({ ...textPatch, ...boundValues(graph, node, bound) })
 }
 
 function isTextBindableField(field: string): field is TextBindableField {
   return (TEXT_BINDABLE_FIELDS as readonly string[]).includes(field)
 }
 
-function styleBoundValues(
-  graph: SceneGraph,
-  node: SceneNode,
-  style: SceneNode
-): CharacterStyleOverride {
-  const values: CharacterStyleOverride = {}
+type FieldBinding = readonly [TextBindableField, Variable]
+
+function styleBoundVariables(graph: SceneGraph, style: SceneNode): FieldBinding[] {
+  const bound: FieldBinding[] = []
   for (const [field, variableId] of Object.entries(textStyleBoundVariables(style))) {
     const variable = graph.variables.get(variableId)
     if (variable && isTextBindableField(field)) {
-      Object.assign(values, boundValue(graph, node, field, variable))
+      bound.push([field, variable])
     }
+  }
+  return bound
+}
+
+function boundValues(
+  graph: SceneGraph,
+  node: SceneNode,
+  bound: readonly FieldBinding[]
+): CharacterStyleOverride {
+  const values: CharacterStyleOverride = {}
+  for (const [field, variable] of bound) {
+    Object.assign(values, boundValue(graph, node, field, variable))
   }
   return values
 }

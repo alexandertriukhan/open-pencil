@@ -187,6 +187,32 @@ describe('style ranges', () => {
     expect(text.getRangeBoundVariable(0, 5, 'fontSize')).toBeNull()
   })
 
+  test('give each text the value a changed style binds in its own mode', () => {
+    const { api, text } = styledText()
+    const graph = api.graph
+    const roomyCopy = api.createText()
+    roomyCopy.characters = 'Hello world'
+    const collection = graph.createCollection('Type scale')
+    const roomy = graph.createMode(collection.id, 'Roomy') ?? ''
+    const size = graph.createVariable('Body size', 'FLOAT', collection.id, 14)
+    size.valuesByMode[roomy] = 20
+    const style = api.createTextStyle()
+    style.fontSize = 14
+    const styleNode = graph.getSharedStyleNode(style.id, 'TEXT')
+    if (!styleNode) {
+      throw new Error('Expected the text style node')
+    }
+    graph.updateNode(styleNode.id, { boundVariables: { fontSize: size.id } })
+    graph.updateNode(roomyCopy.id, { variableModes: { [collection.id]: roomy } })
+    text.setRangeTextStyleId(0, 5, style.id)
+    roomyCopy.setRangeTextStyleId(0, 5, style.id)
+
+    style.letterSpacing = { unit: 'PIXELS', value: 2 }
+
+    expect([text.getRangeFontSize(0, 5), roomyCopy.getRangeFontSize(0, 5)]).toEqual([14, 20])
+    expect(roomyCopy.getRangeLetterSpacing(0, 5)).toEqual({ unit: 'PIXELS', value: 2 })
+  })
+
   test('leave the style where a text binds a field the style gives it, as Figma does', () => {
     const { api, text } = styledText()
     const graph = api.graph

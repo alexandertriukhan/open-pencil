@@ -17,7 +17,7 @@ import {
 } from '@open-pencil/scene-graph/shared-styles'
 
 import { figmaFills } from '#core/figma-api/accessors/visual'
-import { rangeSharedStylePatch } from '#core/figma-api/text/bindings'
+import { sharedStyleRangePatcher } from '#core/figma-api/text/bindings'
 import { setPaintBindings } from '#core/figma-api/variables/bindings'
 import {
   layerTextStyleChanges,
@@ -167,13 +167,19 @@ function updateUsers(
 /** Gives the layers and text ranges that use `style` its values, after the style changed. */
 export function restyleUsers(graph: SceneGraph, style: SceneNode, update: LayerUpdate): void {
   const id = style.source.id ?? ''
+  const rangePatch = sharedStyleRangePatcher(
+    graph,
+    style.sharedStyleType === 'TEXT' ? 'text' : 'fill',
+    id,
+    style
+  )
   updateUsers(
     graph,
     style,
     update,
     // A layer's own fields only: its ranges keep the values they set themselves.
     (node, kind) => sharedStylePatch(kind, node, id, style),
-    (node, kind) => rangeSharedStylePatch(graph, node, kind, id) ?? {},
+    rangePatch,
     (node, kind) => bindStylePaints(graph, node, kind, id)
   )
 }
