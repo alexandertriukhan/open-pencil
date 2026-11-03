@@ -7,12 +7,12 @@ import { buildVariantName, parseVariantName } from '@open-pencil/scene-graph/var
 import { assertNodeEditable } from '#core/editor/capabilities'
 import { reapplyInstanceComponentProperties } from '#core/editor/components/properties'
 import {
-  restoreInstance,
-  restoreSubtree,
-  snapshotInstance,
-  snapshotSubtree,
-  type InstanceSnapshot
-} from '#core/editor/history/subtree'
+  applyDocumentChange,
+  isEmptyDocumentChange,
+  type DocumentChange
+} from '#core/editor/history/document-change'
+import { recordEdit } from '#core/editor/history/edit'
+import { restoreSubtree, snapshotSubtree } from '#core/editor/history/subtree'
 import type { EditorContext } from '#core/editor/types'
 
 import { addVariant, appendVariant } from './add'
@@ -81,6 +81,23 @@ export function createVariantActions(ctx: EditorContext) {
     }))
   }
 
+  function pushSwitchStep(change: DocumentChange) {
+    if (isEmptyDocumentChange(change)) {
+      return
+    }
+    const show = (side: 'before' | 'after') => {
+      applyDocumentChange(ctx.graph, change, side)
+      ctx.setSelectedIds(new Set())
+      ctx.state.hoveredNodeId = null
+      ctx.requestRender()
+    }
+    ctx.undo.push({
+      label: 'Switch variant',
+      forward: () => show('after'),
+      inverse: () => show('before')
+    })
+  }
+
   function switchInstanceVariant(
     instanceId: string,
     propertyName: string,
@@ -129,28 +146,19 @@ export function createVariantActions(ctx: EditorContext) {
       return { kind: 'unchanged', componentId: target.id }
     }
 
-    const before = snapshotInstance(ctx.graph, instanceId)
-    unbind()
-    ctx.graph.swapInstanceComponent(instanceId, target.id)
-    reapplyInstanceComponentProperties(ctx, instanceId)
-    ctx.requestRender()
-    let redone: InstanceSnapshot | undefined
-    const show = (snapshot: InstanceSnapshot) => {
-      restoreInstance(ctx.graph, snapshot)
-      ctx.requestRender()
-    }
-    ctx.undo.push({
+    const options = {
       label: 'Switch variant',
-      forward: () => {
-        if (redone) {
-          show(redone)
-        }
-      },
-      inverse: () => {
-        redone = snapshotInstance(ctx.graph, instanceId)
-        show(before)
-      }
+      layerId: instanceId,
+      push: false,
+      onRecorded: pushSwitchStep
+    }
+    recordEdit(ctx, options, () => {
+      unbind()
+      ctx.graph.swapInstanceComponent(instanceId, target.id)
+      reapplyInstanceComponentProperties(ctx, instanceId)
+      ctx.runLayoutForNode(instanceId)
     })
+    ctx.requestRender()
     return { kind: 'changed', componentId: target.id }
   }
 
