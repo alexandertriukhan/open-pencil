@@ -57,7 +57,8 @@ export const READ_ONLY_ACTIONS: ReadonlySet<string> = new Set([
   // Selection and hover
   'clearSelection',
   'enterContainer',
-  'exitContainer',
+  'enterContainerOf',
+  'exitContainers',
   'select',
   'selectAll',
   'selectAtPoint',
