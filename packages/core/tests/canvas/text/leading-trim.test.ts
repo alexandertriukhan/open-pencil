@@ -4,23 +4,33 @@ import { expectDefined } from '#core-tests/helpers/assert'
 import type { CanvasKit, TypefaceFontProvider } from 'canvaskit-wasm'
 
 import { SceneGraph, type SceneNode } from '@open-pencil/scene-graph'
-import { percentLength } from '@open-pencil/scene-graph/text'
+import { percentLength, pixelLength } from '@open-pencil/scene-graph/text'
 
+import { textVerticalOffset } from '#core/canvas/text'
 import type { TextLayout } from '#core/canvas/text/layout'
 import { buildParagraph } from '#core/canvas/text/layout/build'
 import { getCanvasKit } from '#core/canvaskit'
+import { estimateTextSize } from '#core/layout/text-measurement'
+import { TYPICAL_CAP_HEIGHT_EMS } from '#core/text/font/glyphs'
 import { fontManager } from '#core/text/font/manager'
+import { fontTableView } from '#core/text/font/variation'
 
-const INTER_CAP_HEIGHT_EMS = 1490 / 2048
+const INTER_UNITS_PER_EM = 2048
+const INTER_CAP_HEIGHT_EMS = 1490 / INTER_UNITS_PER_EM
 const BADGE_FONT_SIZES = [12, 14, 16, 18, 24, 28, 32]
 const SURFACE_SIZE = 200
+const OS2_VERSION_WITHOUT_CAP_HEIGHT = 1
+const HHEA_ASCENDER = 4
+const HHEA_DESCENDER = 6
 
 let ck: CanvasKit
 let provider: TypefaceFontProvider
+let interAscenderEms = 0
+let interDescenderEms = 0
 
-function layOut(props: Partial<SceneNode>): TextLayout {
+function textNode(props: Partial<SceneNode>): SceneNode {
   const graph = new SceneGraph()
-  const node = graph.createNode('TEXT', graph.getPages()[0].id, {
+  return graph.createNode('TEXT', graph.getPages()[0].id, {
     fontFamily: 'Inter',
     fontSize: 24,
     lineHeight: percentLength(110),
@@ -30,17 +40,28 @@ function layOut(props: Partial<SceneNode>): TextLayout {
     height: 100,
     ...props
   })
+}
+
+function layOutNode(node: SceneNode): TextLayout {
   return buildParagraph({ ck, fontProvider: provider, fontsLoaded: true }, node, undefined, {
     halfLeading: true
   })
 }
 
-function inkTop(layout: TextLayout): number {
+function layOut(props: Partial<SceneNode>): TextLayout {
+  return layOutNode(textNode(props))
+}
+
+function baselines(layout: TextLayout): number[] {
+  return layout.getLineMetrics().map((line) => line.baseline)
+}
+
+function inkRows(layout: TextLayout, top = 0): { top: number; bottom: number } {
   const surface = expectDefined(ck.MakeSurface(SURFACE_SIZE, SURFACE_SIZE), 'surface')
   try {
     const canvas = surface.getCanvas()
     canvas.clear(ck.WHITE)
-    layout.draw(canvas, 0, 0)
+    layout.draw(canvas, 0, top)
     const pixels = expectDefined(
       canvas.readPixels(0, 0, {
         width: SURFACE_SIZE,
@@ -51,17 +72,28 @@ function inkTop(layout: TextLayout): number {
       }),
       'pixels'
     )
+    const inked: number[] = []
     for (let y = 0; y < SURFACE_SIZE; y++) {
       for (let x = 0; x < SURFACE_SIZE; x++) {
         if (pixels[(y * SURFACE_SIZE + x) * 4] < 128) {
-          return y
+          inked.push(y)
+          break
         }
       }
     }
-    return -1
+    return { top: inked.at(0) ?? -1, bottom: inked.at(-1) ?? -1 }
   } finally {
     surface.delete()
   }
+}
+
+function withoutCapHeight(font: ArrayBuffer): ArrayBuffer {
+  const copy = font.slice(0)
+  expectDefined(fontTableView(copy, 'OS/2'), 'OS/2 table').setUint16(
+    0,
+    OS2_VERSION_WITHOUT_CAP_HEIGHT
+  )
+  return copy
 }
 
 describe('cap-height leading trim', () => {
@@ -75,6 +107,12 @@ describe('cap-height leading trim', () => {
     )
     provider.registerFont(inter, 'Inter')
     await fontManager.markLoaded('Inter', 'Regular', inter)
+    const noCapHeight = withoutCapHeight(inter)
+    provider.registerFont(noCapHeight, 'No Cap Height')
+    await fontManager.markLoaded('No Cap Height', 'Regular', noCapHeight)
+    const hhea = expectDefined(fontTableView(inter, 'hhea'), 'hhea table')
+    interAscenderEms = hhea.getInt16(HHEA_ASCENDER) / INTER_UNITS_PER_EM
+    interDescenderEms = -hhea.getInt16(HHEA_DESCENDER) / INTER_UNITS_PER_EM
   })
 
   afterAll(() => {
@@ -86,28 +124,131 @@ describe('cap-height leading trim', () => {
     for (const fontSize of BADGE_FONT_SIZES) {
       const capHeight = INTER_CAP_HEIGHT_EMS * fontSize
       const layout = layOut({ text: '75', fontSize })
-      const baseline = expectDefined(layout.getLineMetrics().at(0), 'line').baseline
-      expect(baseline).toBeCloseTo(capHeight, 2)
+      expect(baselines(layout)[0]).toBeCloseTo(capHeight, 2)
       expect(layout.getHeight()).toBeCloseTo(capHeight, 2)
-      expect(inkTop(layout)).toBeLessThanOrEqual(1)
+      expect(inkRows(layout).top).toBeLessThanOrEqual(1)
       layout.delete()
     }
   })
 
   test('trims a text of several lines to its first cap height and last baseline', () => {
     const layout = layOut({ text: '75\n50', fontSize: 20 })
-    const lines = layout.getLineMetrics()
-    expect(lines).toHaveLength(2)
+    const [first, second] = baselines(layout)
+    expect(baselines(layout)).toHaveLength(2)
+    expect(first).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(second - first).toBeCloseTo(22, 2)
+    expect(layout.getHeight()).toBeCloseTo(second, 2)
+    layout.delete()
+  })
+
+  test('steps lines by a line height in pixels', () => {
+    const layout = layOut({ text: '75\n50', fontSize: 20, lineHeight: pixelLength(30) })
+    const [first, second] = baselines(layout)
+    expect(first).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(second - first).toBeCloseTo(30, 2)
+    expect(layout.getHeight()).toBeCloseTo(second, 2)
+    layout.delete()
+  })
+
+  test('steps lines by the font line height when the line height is auto', () => {
+    const layout = layOut({ text: '75\n50', fontSize: 20, lineHeight: null })
+    const [first, second] = baselines(layout)
+    expect(first).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(second - first).toBeCloseTo((interAscenderEms + interDescenderEms) * 20, 0)
+    expect(layout.getHeight()).toBeCloseTo(second, 2)
+    layout.delete()
+  })
+
+  test('keeps paragraph spacing between the trimmed lines', () => {
+    const layout = layOut({ text: '75\n50', fontSize: 20, paragraphSpacing: 10 })
+    const [first, second] = baselines(layout)
+    expect(first).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(second - first).toBeCloseTo(32, 2)
+    expect(layout.getHeight()).toBeCloseTo(second, 2)
+    layout.delete()
+  })
+
+  test('keeps a truncated last line whose baseline fits the box', () => {
+    const truncated = {
+      text: 'Ab\nCd',
+      fontSize: 20,
+      textAutoResize: 'NONE' as const,
+      textTruncation: 'ENDING' as const
+    }
     const capHeight = INTER_CAP_HEIGHT_EMS * 20
-    expect(lines[0].baseline).toBeCloseTo(capHeight, 2)
-    expect(layout.getHeight()).toBeCloseTo(lines[1].baseline, 2)
-    expect(lines[1].baseline - lines[0].baseline).toBeCloseTo(22, 0)
+    for (const height of [capHeight + 22, 37]) {
+      const fits = layOut({ ...truncated, height })
+      expect(baselines(fits)).toHaveLength(2)
+      expect(baselines(fits)[1]).toBeCloseTo(capHeight + 22, 2)
+      fits.delete()
+    }
+    const overflows = layOut({ ...truncated, height: 36 })
+    expect(baselines(overflows)).toHaveLength(1)
+    overflows.delete()
+  })
+
+  test('centres and bottom-aligns the trimmed box from cap height to baseline', () => {
+    const capHeight = INTER_CAP_HEIGHT_EMS * 20
+    for (const [textAlignVertical, top] of [
+      ['CENTER', (60 - capHeight) / 2],
+      ['BOTTOM', 60 - capHeight]
+    ] as const) {
+      const node = textNode({
+        text: 'HE',
+        fontSize: 20,
+        textAutoResize: 'NONE',
+        height: 60,
+        textAlignVertical
+      })
+      const layout = layOutNode(node)
+      const offset = textVerticalOffset(node, layout.getHeight())
+      expect(offset).toBeCloseTo(top, 2)
+      const ink = inkRows(layout, offset)
+      expect(Math.abs(ink.top - top)).toBeLessThanOrEqual(1)
+      expect(Math.abs(ink.bottom + 1 - (top + capHeight))).toBeLessThanOrEqual(1)
+      layout.delete()
+    }
+  })
+
+  test('puts the tallest cap height of the first line at the top', () => {
+    const layout = layOut({
+      text: 'aBIG',
+      fontSize: 40,
+      styleRuns: [{ start: 0, length: 1, style: { fontSize: 12 } }]
+    })
+    expect(baselines(layout)[0]).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 40, 2)
+    expect(inkRows(layout).top).toBeLessThanOrEqual(1)
+    layout.delete()
+  })
+
+  test('trims a style the variable font draws from its default face', () => {
+    const layout = layOut({ text: '75', fontSize: 20, fontWeight: 700 })
+    expect(baselines(layout)[0]).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(inkRows(layout).top).toBeLessThanOrEqual(1)
+    layout.delete()
+  })
+
+  test('measures the cap height from the glyphs of a font that declares none', () => {
+    const layout = layOut({ text: 'HE', fontSize: 20, fontFamily: 'No Cap Height' })
+    expect(baselines(layout)[0]).toBeCloseTo(INTER_CAP_HEIGHT_EMS * 20, 2)
+    expect(inkRows(layout).top).toBeLessThanOrEqual(1)
     layout.delete()
   })
 
   test('keeps the line box of untrimmed text', () => {
     const layout = layOut({ text: '75', fontSize: 20, leadingTrim: 'NONE' })
-    expect(layout.getHeight()).toBeCloseTo(22, 0)
+    const contentHeight = (interAscenderEms + interDescenderEms) * 20
+    expect(baselines(layout)[0]).toBeCloseTo((22 - contentHeight) / 2 + interAscenderEms * 20, 2)
+    expect(layout.getHeight()).toBeCloseTo(22, 2)
     layout.delete()
+  })
+
+  test('estimates a trimmed size without CanvasKit as live layout lays it out', () => {
+    const node = textNode({ text: '75', fontSize: 20 })
+    const layout = layOutNode(node)
+    expect(estimateTextSize(node).height).toBeCloseTo(layout.getHeight(), 2)
+    layout.delete()
+    const unknown = textNode({ text: '75', fontSize: 20, fontFamily: 'Not Loaded Anywhere' })
+    expect(estimateTextSize(unknown).height).toBeCloseTo(TYPICAL_CAP_HEIGHT_EMS * 20, 2)
   })
 })
