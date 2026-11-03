@@ -30,6 +30,7 @@ import type { TextRenderer } from '#core/canvas/text/renderer'
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE } from '#core/constants'
 import { autoWidthWrapWidth } from '#core/layout/text-measurement'
 import { shownText } from '#core/text/case'
+import { capHeightEms } from '#core/text/font/cap-height'
 import { glyphAdvanceSync } from '#core/text/font/glyphs'
 import { textFontFace } from '#core/text/requirements/collect'
 import { utf8Length } from '#core/text/utf8'
@@ -264,7 +265,7 @@ function buildBlocks(
     }
     throw error
   }
-  return new TextLayout(r.ck, blocks, maxLines)
+  return new TextLayout(r.ck, blocks, maxLines, trimmedCapHeight(node))
 
   function buildBlock(index: number, start: number, end: number): TextLayoutBlock {
     const shownRange: TextParagraphRange = shownRanges[index]
@@ -382,8 +383,22 @@ function createTextLayout(
         r.ck,
         buildSkParagraph(r, node, color, options),
         shownText(node).length,
-        paragraphLines(r, node, color, options)
+        paragraphLines(r, node, color, options),
+        trimmedCapHeight(node)
       )
+}
+
+function trimmedCapHeight(node: ParagraphNode): number | undefined {
+  if (node.leadingTrim !== 'CAP_HEIGHT') {
+    return undefined
+  }
+  const style = styleAt(node.styleRuns, 0)
+  const face = textFontFace(node, style)
+  const ems = capHeightEms(face.family, face.style)
+  if (ems === null) {
+    return undefined
+  }
+  return ems * (style?.fontSize ?? (node.fontSize || DEFAULT_FONT_SIZE))
 }
 
 /** How many laid-out line boxes fit the fixed height, preserving the first line. */

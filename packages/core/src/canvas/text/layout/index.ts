@@ -88,36 +88,37 @@ export class TextLayout {
     ck: CanvasKit,
     paragraph: Paragraph,
     length: number,
-    lines?: TextLayoutBlockLines
+    lines?: TextLayoutBlockLines,
+    capHeight?: number
   ): TextLayout {
-    return new TextLayout(ck, [
-      {
-        paragraph,
-        start: 0,
-        utf8Start: 0,
-        length,
-        lead: 0,
-        utf8Lead: 0,
-        leadWidth: 0,
-        empty: false,
-        inset: 0,
-        rtl: false,
-        spaceBefore: 0,
-        marker: null,
-        lines,
-        x: 0,
-        y: 0,
-        visible: true,
-        metrics: []
-      }
-    ])
+    const block: TextLayoutBlock = {
+      paragraph,
+      start: 0,
+      utf8Start: 0,
+      length,
+      lead: 0,
+      utf8Lead: 0,
+      leadWidth: 0,
+      empty: false,
+      inset: 0,
+      rtl: false,
+      spaceBefore: 0,
+      marker: null,
+      lines,
+      x: 0,
+      y: 0,
+      visible: true,
+      metrics: []
+    }
+    return new TextLayout(ck, [block], undefined, capHeight)
   }
 
   constructor(
     private readonly ck: CanvasKit,
     readonly blocks: TextLayoutBlock[],
     /** Lines the text may show in all, when it is truncated across blocks. */
-    private readonly maxLines?: number
+    private readonly maxLines?: number,
+    private readonly capHeight?: number
   ) {}
 
   /** The line cap a block's paragraph was rebuilt with, when it differs from `maxLines`. */
@@ -160,6 +161,7 @@ export class TextLayout {
       lines += block.metrics.length
     }
     this.placeLines(width)
+    this.trimToCapHeight()
     for (const block of this.visibleBlocks()) this.placeMarker(block)
     this.collectLines()
     this.height = this.measureHeight()
@@ -195,6 +197,24 @@ export class TextLayout {
       this.placements.set(block, placement)
     }
     this.placedHeight = placed.height
+  }
+
+  private trimToCapHeight(): void {
+    const visible = this.visibleBlocks()
+    const first = visible.at(0)
+    const last = visible.at(-1)
+    const firstLine = first?.metrics.at(0)
+    const lastLine = last?.metrics.at(-1)
+    if (this.capHeight === undefined || !first || !last || !firstLine || !lastLine) {
+      return
+    }
+    const firstBaseline = first.y + firstLine.baseline + this.lineOffset(first, 0)
+    const lastBaseline = last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
+    const top = firstBaseline - this.capHeight
+    for (const block of visible) {
+      block.y -= top
+    }
+    this.placedHeight = lastBaseline - top
   }
 
   /** The block's line `index` stands this far below where its paragraph has it. */
