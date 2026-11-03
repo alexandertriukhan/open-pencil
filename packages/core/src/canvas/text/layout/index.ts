@@ -63,6 +63,8 @@ export interface TextLayoutBlock {
   metrics: LineMetrics[]
 }
 
+export type LineCapHeight = (start: number, end: number) => number
+
 export interface TextCaretBox {
   x: number
   top: number
@@ -89,7 +91,7 @@ export class TextLayout {
     paragraph: Paragraph,
     length: number,
     lines?: TextLayoutBlockLines,
-    capHeight?: number
+    capHeight?: LineCapHeight
   ): TextLayout {
     const block: TextLayoutBlock = {
       paragraph,
@@ -118,7 +120,7 @@ export class TextLayout {
     readonly blocks: TextLayoutBlock[],
     /** Lines the text may show in all, when it is truncated across blocks. */
     private readonly maxLines?: number,
-    private readonly capHeight?: number
+    private readonly capHeight?: LineCapHeight
   ) {}
 
   /** The line cap a block's paragraph was rebuilt with, when it differs from `maxLines`. */
@@ -210,7 +212,9 @@ export class TextLayout {
     }
     const firstBaseline = first.y + firstLine.baseline + this.lineOffset(first, 0)
     const lastBaseline = last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
-    const top = firstBaseline - this.capHeight
+    const start = this.toTextIndex(first, firstLine.startIndex)
+    const end = this.toTextIndex(first, firstLine.endIndex)
+    const top = firstBaseline - this.capHeight(start, end)
     for (const block of visible) {
       block.y -= top
     }
