@@ -29,13 +29,6 @@ export function defaultVariant(graph: SceneGraph, set: SceneNode): SceneNode | u
   return first
 }
 
-function variantsInReadingOrder(graph: SceneGraph, set: SceneNode): SceneNode[] {
-  return graph
-    .getChildren(set.id)
-    .filter((child) => child.type === 'COMPONENT')
-    .sort(compareCanvasPosition)
-}
-
 /**
  * The value a variant property starts at: its recorded default when that is one of its options,
  * or else the default variant's, since a document may leave the recorded default empty.
@@ -94,9 +87,16 @@ function indexVariants(graph: SceneGraph, set: SceneNode): IndexedVariants {
     .filter((definition) => definition.type === 'VARIANT')
     .map((definition) => definition.name)
   const byValues = new Map<string, SceneNode>()
-  for (const variant of variantsInReadingOrder(graph, set)) {
+  for (const variant of graph.getChildren(set.id)) {
+    if (variant.type !== 'COMPONENT') {
+      continue
+    }
     const key = variantValuesKey(propertyNames, variant.componentPropertyValues)
-    if (key !== undefined && !byValues.has(key)) {
+    if (key === undefined) {
+      continue
+    }
+    const indexed = byValues.get(key)
+    if (!indexed || readsBefore(variant, indexed)) {
       byValues.set(key, variant)
     }
   }

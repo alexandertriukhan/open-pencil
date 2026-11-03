@@ -91,4 +91,28 @@ describe('variant lookup', () => {
 
     expect(createVariantLookup(graph)(set, { Size: 'Small' })?.name).toBe('Size=Small above')
   })
+
+  test('finds the default variant among those with the same values, reading a row across', () => {
+    const graph = new SceneGraph()
+    const set = graph.createNode('COMPONENT_SET', graph.getPages()[0].id, {
+      name: 'Button',
+      componentPropertyDefinitions: [
+        { id: 'size', name: 'Size', type: 'VARIANT', defaultValue: '', variantOptions: ['Small'] }
+      ]
+    })
+    const place = (name: string, x: number, y: number) =>
+      graph.createNode('COMPONENT', set.id, {
+        name,
+        x,
+        y,
+        width: 50,
+        height: 50,
+        componentPropertyValues: { Size: 'Small' }
+      })
+    place('Higher right', 100, 0)
+    place('Lower left', 0, 10)
+
+    expect(defaultVariant(graph, set)?.name).toBe('Lower left')
+    expect(createVariantLookup(graph)(set, { Size: 'Small' })?.name).toBe('Lower left')
+  })
 })
