@@ -10,7 +10,9 @@ import type { SceneGraph } from '../graph'
 import { resizedChildRect } from '../resize'
 import { ownsSlotContent, slotPropertyId } from '../slots/frames'
 import type { SceneNode } from '../types'
+import { applyEnclosingAssignments } from './assignments'
 import { keepCopy, takeKeptCopy } from './kept-copies'
+import { keepOverrides, restoreOverrides, type OverrideScope } from './kept-overrides'
 import { findInstanceAncestor, ownsSelfFillField, showsBoundVariant } from './main-component'
 import { hasInstanceOverride, overriddenBindingField, setInstanceOverride } from './overrides'
 import {
@@ -229,6 +231,24 @@ function removeCopy(swap: Swap, copy: SceneNode): void {
   swap.graph.deleteNode(copy.id)
 }
 
+/** The switch as the kept overrides see it. */
+function overrideScope(swap: Swap): OverrideScope {
+  return {
+    graph: swap.graph,
+    instance: swap.instance,
+    owners: swap.owners,
+    willChange: (owner) => changeOwner(swap, owner)
+  }
+}
+
+/** Removes a copy the new variant has no layer for, keeping its overrides for a later switch. */
+function removeStaleCopy(swap: Swap, copy: SceneNode): void {
+  if (!swap.keepsRemoved) {
+    keepOverrides(overrideScope(swap), copy)
+  }
+  removeCopy(swap, copy)
+}
+
 function isSwappedCopy(swap: Swap, copy: SceneNode): boolean {
   return swap.owners.some((owner) =>
     hasInstanceOverride(owner.instanceOverrides, owner.id, copy.id, 'componentId')
@@ -410,9 +430,11 @@ function followInside(swap: Swap, layer: SceneNode, copy: SceneNode): void {
 
 function matchCopies(swap: Swap, compParent: SceneNode, instParent: SceneNode) {
   const stale: SceneNode[] = []
+  /** Copies whose layer the new variant draws as another type, by that layer's index. */
+  const retyped = new Map<number, SceneNode>()
   const byLayer = copiesByLayer(swap, instParent, stale)
   const ordinals = new Map<string, number>()
-  const matched = compParent.childIds.map((layerId) => {
+  const matched = compParent.childIds.map((layerId, index) => {
     const layer = swap.graph.getNode(layerId)
     if (!layer) {
       return undefined
@@ -423,11 +445,11 @@ function matchCopies(swap: Swap, compParent: SceneNode, instParent: SceneNode) {
     if (!copy || copy.type === layer.type) {
       return copy
     }
-    stale.push(copy)
+    retyped.set(index, copy)
     return undefined
   })
   stale.push(...untakenCopies(byLayer))
-  return { matched, stale }
+  return { matched, stale, retyped }
 }
 
 function standsInOrderFor(swap: Swap, copy: SceneNode, layer: SceneNode, index: number): boolean {
@@ -474,9 +496,12 @@ function followLayers(swap: Swap, compParent: SceneNode, instParent: SceneNode):
     return
   }
   const { graph } = swap
-  const { matched, stale } = matchCopies(swap, compParent, instParent)
-  for (const copy of stale) {
-    removeCopy(swap, copy)
+  const { matched, stale, retyped } = matchCopies(swap, compParent, instParent)
+  // Paths are read while the old copies still stand in their old order. A copy the new variant
+  // draws as another type gives its overrides to the new copy the same way, so the layers in it
+  // keep theirs too, as Figma keeps a rectangle's opacity on the ellipse of the same name.
+  for (const copy of [...stale, ...retyped.values()]) {
+    removeStaleCopy(swap, copy)
   }
   compParent.childIds.forEach((layerId, index) => {
     const layer = graph.getNode(layerId)
@@ -490,6 +515,10 @@ function followLayers(swap: Swap, compParent: SceneNode, instParent: SceneNode):
     }
     if (following) {
       followCopy(swap, { compParent, instParent, compChild: layer, instChild: following })
+    } else {
+      // A new copy takes the values the instances around it assign, as one a sync adds does.
+      applyEnclosingAssignments(graph, copy)
+      restoreOverrides(overrideScope(swap), copy)
     }
   })
 }

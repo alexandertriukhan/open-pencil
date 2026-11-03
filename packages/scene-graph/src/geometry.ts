@@ -218,6 +218,30 @@ function miterRatio(network: VectorNetwork, join: StrokeJoin | undefined, limit 
   return ratio
 }
 
+/**
+ * The blur radius Figma draws: a negative one, which only a bound variable can give, draws as no
+ * blur, though the layer keeps the value.
+ */
+export function drawnBlurRadius(radius: number): number {
+  return Math.max(0, radius)
+}
+
+const BLUR_SIGMA_PER_RADIUS = 0.43
+
+/**
+ * The Gaussian sigma that draws a Figma blur radius as Figma does. Measured on Figma 126 exports,
+ * layer blur, both shadows, and background blur fall off as a Gaussian of 0.43 × radius; Figma's
+ * SVG export writes radius / 2, which is wider (`packages/core/tests/canvas/blur.test.ts`).
+ */
+export function blurSigma(radius: number): number {
+  return drawnBlurRadius(radius) * BLUR_SIGMA_PER_RADIUS
+}
+
+/** The Figma blur radius that draws a Gaussian of `sigma`, the inverse of `blurSigma`. */
+export function blurRadiusForSigma(sigma: number): number {
+  return Math.max(0, sigma) / BLUR_SIGMA_PER_RADIUS
+}
+
 export function effectOverflow(effects?: Effect[]) {
   let left = 0
   let right = 0
@@ -233,7 +257,7 @@ export function effectOverflow(effects?: Effect[]) {
     ) {
       continue
     }
-    const blurSpread = effect.radius + effect.spread
+    const blurSpread = drawnBlurRadius(effect.radius) + effect.spread
     left = Math.max(left, blurSpread + Math.max(0, -effect.offset.x))
     right = Math.max(right, blurSpread + Math.max(0, effect.offset.x))
     top = Math.max(top, blurSpread + Math.max(0, -effect.offset.y))

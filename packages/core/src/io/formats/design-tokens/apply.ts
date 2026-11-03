@@ -17,6 +17,7 @@ import { copyEffects } from '@open-pencil/scene-graph/copy'
 import { findInstanceAncestor } from '@open-pencil/scene-graph/instances'
 import { createDefaultSourceMetadata } from '@open-pencil/scene-graph/node-defaults'
 import { randomHex } from '@open-pencil/scene-graph/random'
+import { effectBindingTarget } from '@open-pencil/scene-graph/variables'
 
 import { reconcileVariableLayouts } from '#core/layout/variables'
 
@@ -51,6 +52,7 @@ export interface TokenImportTarget {
   addStyle(style: PlannedStyle, fields: Partial<SceneNode>): SceneNode
   updateNode(nodeId: string, changes: Partial<SceneNode>): void
   bindVariable(nodeId: string, field: string, variableId: string): void
+  unbindVariable(nodeId: string, field: string): void
 }
 
 export interface TokenImportResult {
@@ -208,6 +210,13 @@ function applyStyles(
     const node = existing ?? target.addStyle(style, { ...style.fields, name: style.name })
     const own = existing && changedFields(existing, style.fields)
     if (own) target.updateNode(node.id, own)
+    if (existing && style.kind === 'EFFECT') {
+      for (const field of Object.keys(node.boundVariables)) {
+        if (effectBindingTarget(field) && !Object.hasOwn(style.bindings, field)) {
+          target.unbindVariable(node.id, field)
+        }
+      }
+    }
     if (own && node.source.id) {
       const patch = consumerPatch(node, style.kind)
       for (const consumer of styleConsumers(target.graph, node, style.kind)) {
@@ -307,7 +316,8 @@ function graphTokenImportTarget(
       )
     },
     updateNode: (nodeId, changes) => graph.updateNode(nodeId, changes),
-    bindVariable: (nodeId, field, variableId) => graph.bindVariable(nodeId, field, variableId)
+    bindVariable: (nodeId, field, variableId) => graph.bindVariable(nodeId, field, variableId),
+    unbindVariable: (nodeId, field) => graph.unbindVariable(nodeId, field)
   }
 }
 

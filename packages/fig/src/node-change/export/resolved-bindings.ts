@@ -1,6 +1,7 @@
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
 import {
   createTextStyleLookup,
+  resolvedEffectBindings,
   resolvedNumericBindings,
   resolvedPaintBindings,
   resolvedRunBindings,
@@ -24,7 +25,8 @@ export function nodeWithResolvedBindings(
     ...resolvedNumericBindings(graph, node, 'default', styles),
     ...resolvedPaintBindings(graph, node, 'default'),
     ...resolvedValueBindings(graph, node, 'default'),
-    ...resolvedRunBindings(graph, node, 'default', styles)
+    ...resolvedRunBindings(graph, node, 'default', styles),
+    ...resolvedEffectBindings(graph, node, 'default')
   }
   return Object.keys(changes).length > 0 ? { ...node, ...changes } : node
 }

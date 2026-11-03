@@ -6,6 +6,7 @@ import {
   fontInstance,
   glyphCommands,
   harfBuzzFont,
+  harfBuzzTable,
   isHarfBuzzLoaded,
   loadHarfBuzz,
   shapeText,
@@ -14,7 +15,6 @@ import {
   type OutlineCommand,
   type ShapingOptions
 } from './harfbuzz'
-import { fontTableView } from './variation'
 
 export type { OutlineCommand } from './harfbuzz'
 
@@ -114,8 +114,8 @@ const lineMetricsCache = new WeakMap<HarfBuzzFont, LineMetrics>()
 function lineMetrics(parsed: HarfBuzzFont): LineMetrics {
   const cached = lineMetricsCache.get(parsed)
   if (cached) return cached
-  const hhea = fontTableView(parsed.bytes, 'hhea')
-  const os2 = fontTableView(parsed.bytes, 'OS/2')
+  const hhea = harfBuzzTable(parsed.face, 'hhea')
+  const os2 = harfBuzzTable(parsed.face, 'OS/2')
   const hasHhea = hhea !== null && hhea.byteLength >= 8
   const metrics = {
     ascender: hasHhea ? hhea.getInt16(4) : 0,

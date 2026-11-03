@@ -9,13 +9,21 @@ import type { Color } from '../primitives'
 import { pixelLength } from '../text/lengths'
 import type {
   CharacterStyleOverride,
+  Effect,
   Fill,
   SceneNode,
   Stroke,
   StyleRun,
   TextLength
 } from '../types'
-import { NUMERIC_FIELDS, isNumericVariableBindingField, paintBindingTarget } from './fields'
+import {
+  effectBindableProperties,
+  effectBindingTarget,
+  NUMERIC_FIELDS,
+  isNumericVariableBindingField,
+  paintBindingTarget,
+  type EffectBindingProperty
+} from './fields'
 import {
   createTextStyleLookup,
   effectiveBoundVariables,
@@ -46,8 +54,14 @@ export {
 } from './variant-bindings'
 export { showBoundVariants } from './variant-reconcile'
 export {
+  EFFECT_BINDING_PROPERTIES,
+  effectBindableProperties,
+  effectBindingField,
+  effectBindingTarget,
+  effectBindingVariableType,
   isNumericVariableBindingField,
   paintBindingTarget,
+  type EffectBindingProperty,
   TEXT_CONTENT_VARIABLE_TYPES,
   VISIBILITY_VARIABLE_TYPES,
   type PaintBindingList
@@ -252,6 +266,56 @@ export function resolvedPaintBindings(
     }
   }
   return changes
+}
+
+/** `effect` with one bound property set to its variable's value; a colour keeps its alpha. */
+function withBoundEffectValue(
+  effect: Effect,
+  property: EffectBindingProperty,
+  value: number | Color
+): Effect {
+  if (typeof value !== 'number') return property === 'color' ? { ...effect, color: value } : effect
+  if (property === 'offsetX') return { ...effect, offset: { ...effect.offset, x: value } }
+  if (property === 'offsetY') return { ...effect, offset: { ...effect.offset, y: value } }
+  if (property === 'radius' || property === 'spread') return { ...effect, [property]: value }
+  return effect
+}
+
+/** A bound effect length in an occurrence's coordinates, which are 1:1 outside instances. */
+function scaledLength(length: number | undefined, node: SceneNode): number | undefined {
+  return length === undefined ? undefined : length * node.componentScale
+}
+
+/**
+ * The effects a node's effect bindings resolve to in its mode, when one differs from what the node
+ * holds. Lengths stay as the variables give them, negative ones included, as Figma keeps them;
+ * drawing treats a negative blur as none. In an instance they take its scale against its
+ * component, whenever they were bound, as Figma scales them; a layer scaled outside an instance
+ * goes back to the variable's own value.
+ */
+export function resolvedEffectBindings(
+  graph: SceneGraph,
+  node: SceneNode,
+  fallback: VariableModeFallback = 'active'
+): Pick<Partial<SceneNode>, 'effects'> {
+  // Most nodes bind nothing, so no copy is made until a value actually changes.
+  let effects: Effect[] | undefined
+  for (const [field, variableId] of Object.entries(node.boundVariables)) {
+    const target = effectBindingTarget(field)
+    if (!target) continue
+    const effect = (effects ?? node.effects).at(target.index)
+    if (!effect || !effectBindableProperties(effect.type).includes(target.property)) continue
+    const value =
+      target.property === 'color'
+        ? graph.resolveColorVariableForNode(node.id, variableId, fallback)
+        : scaledLength(graph.resolveNumberVariableForNode(node.id, variableId, fallback), node)
+    if (value == null || (typeof value === 'number' && !Number.isFinite(value))) continue
+    const next = withBoundEffectValue(effect, target.property, value)
+    if (isEqual(next, effect)) continue
+    effects ??= [...node.effects]
+    effects[target.index] = next
+  }
+  return effects ? { effects } : {}
 }
 
 /**
@@ -469,6 +533,10 @@ function applyResolvedBindings(
     ...resolvedNumbers(graph, node, inheritedTextStyleBindings(node, styles), 'active'),
     ...resolvedOwnBindings(graph, node, styles)
   }
+  const effects = resolvedEffectBindings(graph, node)
+  if (!isEmptyObject(effects)) {
+    graph.updateNode(node.id, effects)
+  }
   if (isEmptyObject(unbound) && isEmptyObject(resolved)) {
     return false
   }
@@ -480,9 +548,11 @@ function applyResolvedBindings(
 }
 
 /**
- * Resolve live numeric, text, and visibility bindings, numbers in scene units, without authoring
- * instance overrides. A scope limits it to the layers a change can reach, so layers whose saved
- * values differ from their bindings elsewhere in the document are left as saved.
+ * Resolve live numeric, text, visibility, and effect bindings, numbers in scene units, without
+ * authoring instance overrides. A scope limits it to the layers a change can reach, so layers whose
+ * saved values differ from their bindings elsewhere in the document are left as saved. Returns the
+ * layers whose change needs a layout pass; effects are not a layout input, so an effect-only change
+ * is written but not returned.
  */
 export function reconcileVariableBindings(
   graph: SceneGraph,
@@ -510,4 +580,32 @@ export function reconcileVariableBindingUpdates(
     changed
   )
   return new Map(changed.map((id) => [id, updates.get(id) ?? {}]))
+}
+
+/** A layer list whose items carry their own bindings, keyed by position such as `fills/1/color`. */
+export type BoundLayerList = 'fills' | 'strokes' | 'effects'
+
+/**
+ * `boundVariables` once the `list` items are rebuilt from `sources`, where `sources[i]` is the
+ * position the new item `i` had before, or null for an added item. A binding moves with its item
+ * and goes with a removed one, as Figma keeps a binding on its paint or effect.
+ */
+export function listBindingsAfterEdit(
+  boundVariables: Readonly<Record<string, string>>,
+  list: BoundLayerList,
+  sources: readonly (number | null)[]
+): Record<string, string> {
+  const prefix = `${list}/`
+  const moved: Record<string, string> = {}
+  for (const [field, variableId] of Object.entries(boundVariables)) {
+    if (!field.startsWith(prefix)) {
+      moved[field] = variableId
+      continue
+    }
+    const [index, ...property] = field.slice(prefix.length).split('/')
+    const next = sources.indexOf(Number(index))
+    if (next !== -1 && property.length > 0)
+      moved[`${prefix}${next}/${property.join('/')}`] = variableId
+  }
+  return moved
 }
