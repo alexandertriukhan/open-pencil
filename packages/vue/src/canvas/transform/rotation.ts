@@ -97,7 +97,9 @@ function tryStartSelectionRotation(
   const members = compact(
     [...editor.state.selectedIds].map((id) => {
       const node = editor.graph.getNode(id)
-      if (!node || node.locked) return undefined
+      if (!node || node.locked || !layerRotates(node)) {
+        return undefined
+      }
       return { nodeId: id, placement: selectionPlacement(node, editor.graph) }
     })
   )

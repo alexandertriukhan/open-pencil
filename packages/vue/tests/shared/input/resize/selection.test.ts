@@ -165,3 +165,21 @@ describe('resizing a multi-selection whose layers share an angle', () => {
     expect(after?.box.height).toBeCloseTo(frame.box.height, 6)
   })
 })
+
+describe('resizing a multi-selection with a sticky note', () => {
+  test('leaves the sticky note at its size', () => {
+    const { a } = setup()
+    const sticky = editor.graph.createNode('STICKY', editor.state.currentPageId, {
+      x: 100,
+      y: 100,
+      width: 50,
+      height: 50
+    })
+    editor.select([a, sticky.id])
+    const drag = start(150, 150)
+    applySelectionResize(drag, 300, 300, false, editor)
+    commitSelectionResize(drag, editor)
+    expect(box(editor.graph.getNode(sticky.id))).toEqual({ x: 100, y: 100, width: 50, height: 50 })
+    expect(box(editor.graph.getNode(a))).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+  })
+})

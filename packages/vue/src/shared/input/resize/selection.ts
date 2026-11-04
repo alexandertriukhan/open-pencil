@@ -14,6 +14,7 @@ import {
   turnPoint,
   type SelectionFrame
 } from '@open-pencil/scene-graph/coordinate'
+import { layerResizes } from '@open-pencil/scene-graph/generated'
 
 import { pointInFrame } from '#vue/shared/input/geometry'
 import {
@@ -69,7 +70,9 @@ export function tryStartSelectionResize(
   const members = compact(
     [...editor.state.selectedIds].map((id) => {
       const node = editor.graph.getNode(id)
-      if (!node || node.locked) return undefined
+      if (!node || node.locked || !layerResizes(node)) {
+        return undefined
+      }
       return {
         drag: createResizeDrag(node, hit.handle, cx, cy, editor),
         placement: selectionPlacement(node, editor.graph)

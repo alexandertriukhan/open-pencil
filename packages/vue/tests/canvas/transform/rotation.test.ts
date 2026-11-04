@@ -179,3 +179,21 @@ describe('a rotated multi-selection’s box', () => {
     expect(selectionBox(editor)?.angle).toBe(0)
   })
 })
+
+describe('rotating a multi-selection with a sticky note', () => {
+  test('keeps the sticky note upright and in place', () => {
+    const { a } = setup()
+    const sticky = editor.graph.createNode('STICKY', editor.state.currentPageId, {
+      x: 100,
+      y: 100,
+      width: 50,
+      height: 50
+    })
+    editor.select([a, sticky.id])
+    const drag = grabHandle()
+    handleSelectionRotateMove(editor, drag, 175, 75, false)
+    commitRotationDrag(editor, drag)
+    expect(place(editor.graph.getNode(sticky.id))).toEqual({ x: 100, y: 100, rotation: 0 })
+    expect(place(editor.graph.getNode(a)).rotation).toBe(90)
+  })
+})
