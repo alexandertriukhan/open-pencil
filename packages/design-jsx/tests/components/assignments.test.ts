@@ -51,7 +51,9 @@ function boundIconPanel() {
 
 test('a swap prop on a variant-bound layer unbinds it, so a mode switch keeps the choice', () => {
   const { graph, instance, medium, switchToRoomy } = boundIconPanel()
-  assignNamedProperties(graph, instance, { Icon: medium.id }, (id) => id)
+  assignNamedProperties(graph, instance, { Icon: medium.id }, (reference) =>
+    typeof reference === 'string' ? reference : undefined
+  )
   switchToRoomy()
   const icon = graph.getChildren(instance.id)[0]
 
