@@ -13,7 +13,7 @@ import { emitNavigationTrace } from '#core/profiler'
 
 import { drawChromePass, drawLabelPass, drawOverlayPass } from './overlay-pass'
 import { hasTransientPreviews, renderPageWithPreviews } from './transient-previews'
-import { worldSubtreeVisualBounds } from './visual-bounds'
+import { computeContentBounds } from './visual-bounds'
 
 export function renderSceneToCanvas(
   r: Pick<
@@ -427,7 +427,7 @@ function recordScenePicture(
   const recorder = new r.ck.PictureRecorder()
   try {
     const pageNode = graph.getNode(r.pageId ?? graph.rootId)
-    const sceneContentBounds = pageNode ? worldSubtreeVisualBounds(graph, pageNode.childIds) : null
+    const sceneContentBounds = pageNode ? computeContentBounds(graph, pageNode.childIds) : null
     const sceneBounds = sceneContentBounds
       ? {
           x: sceneContentBounds.minX,

@@ -194,7 +194,12 @@ export class TextLayout {
    * otherwise (`placeLines`).
    */
   private placeLines(width: number): void {
-    const placed = placeLines(this.ck, this.visibleBlocks(), width)
+    const visible = this.visibleBlocks()
+    const first = visible.at(0)
+    // A trimmed box starts at the first line's cap height, so its baselines round from there.
+    const capHeight =
+      this.capHeight && first ? this.firstLineCapHeight(first, this.capHeight) : undefined
+    const placed = placeLines(this.ck, visible, width, capHeight)
     if (!placed) return
     for (const [block, { y, ...placement }] of placed.blocks) {
       block.y = y
@@ -203,6 +208,7 @@ export class TextLayout {
     this.placedHeight = placed.height
   }
 
+  /** Trims the text from its first line's cap height to its last baseline, as Figma does. */
   private trimToCapHeight(): void {
     const visible = this.visibleBlocks()
     const first = visible.at(0)
@@ -215,11 +221,15 @@ export class TextLayout {
     const lastBaseline = lastLine
       ? last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
       : firstBaseline
-    const top = firstBaseline - this.firstLineCapHeight(first, this.capHeight)
+    // Figma ends the box at the last baseline and makes it the trimmed height to the nearest
+    // pixel, so the rest of the first line's cap height stands above it (Figma desktop 126).
+    const capTop = firstBaseline - this.firstLineCapHeight(first, this.capHeight)
+    const height = Math.round(lastBaseline - capTop)
+    const top = lastBaseline - height
     for (const block of visible) {
       block.y -= top
     }
-    this.placedHeight = lastBaseline - top
+    this.placedHeight = height
   }
 
   /** Skia lays an empty paragraph out without lines, but with a baseline. */
