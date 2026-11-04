@@ -72,4 +72,4 @@ export type {
   SelectionRotationPreview,
   ViewportTransform
 } from './types'
-export { selectionKey, storedSelectionAngle } from './selection-frame'
+export { selectionKey, storedSelectionAngle } from './turned-selection'
