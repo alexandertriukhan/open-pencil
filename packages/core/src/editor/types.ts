@@ -26,7 +26,12 @@ import type { SnappingPreferences } from '#core/editor/preferences'
 import type { ShaderRasterizer } from '#core/editor/shaders/types'
 import type { NodeEditState } from '#core/editor/vector/types'
 import type { CanvasView, EditorRestrictions } from '#core/editor/views/types'
-import type { RotationPreview, ShapeHandleKind } from '#core/geometry'
+import type {
+  RotationPreview,
+  SelectionAngle,
+  SelectionRotationPreview,
+  ShapeHandleKind
+} from '#core/geometry'
 import type { IconProvider } from '#core/icons/provider'
 import type { TextEditor } from '#core/text/editor'
 import type { FontResolutionEvent, FontResolutionSnapshot } from '#core/text/resolver'
@@ -135,6 +140,8 @@ export interface EditorViewState {
   snapGuides: SnapGuide[]
   guides: GuideOverlayState
   rotationPreview: RotationPreview | null
+  selectionRotationPreview: SelectionRotationPreview | null
+  selectionAngle: SelectionAngle | null
   dropTargetId: string | null
   layoutInsertIndicator: {
     parentId: string
