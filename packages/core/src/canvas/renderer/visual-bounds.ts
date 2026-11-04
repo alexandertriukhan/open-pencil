@@ -112,3 +112,21 @@ export function subtreeVisualBounds(
   }
   return bounds
 }
+
+export function worldSubtreeVisualBounds(
+  graph: SceneGraph,
+  nodeIds: readonly string[]
+): VisualBounds | null {
+  let bounds: VisualBounds | null = null
+  for (const nodeId of nodeIds) {
+    const node = graph.getNode(nodeId)
+    if (!node?.visible) {
+      continue
+    }
+    bounds = unionVisualBounds(
+      bounds,
+      subtreeVisualBounds(graph, node, getWorldMatrix(node, graph))
+    )
+  }
+  return bounds
+}
