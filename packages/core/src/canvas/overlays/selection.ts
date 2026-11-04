@@ -464,7 +464,9 @@ function drawFrameBounds(
     const [bx, by] = corner((i + 1) % 4)
     canvas.drawLine(ax, ay, bx, by, r.auxStroke)
   }
-  if (!hasTransformHandles(bounds.width * r.zoom, bounds.height * r.zoom)) return
+  if (!r.editHandles || !hasTransformHandles(bounds.width * r.zoom, bounds.height * r.zoom)) {
+    return
+  }
   for (let i = 0; i < 4; i++) drawHandleScreenSpace(r, canvas, ...corner(i))
   // The stalk leaves the top edge's middle along the box's turned "up".
   const [mx, my] = corner(4)
