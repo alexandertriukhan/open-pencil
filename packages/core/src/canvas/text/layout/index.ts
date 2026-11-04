@@ -125,6 +125,7 @@ export class TextLayout {
 
   /** The line cap a block's paragraph was rebuilt with, when it differs from `maxLines`. */
   private readonly caps = new Map<TextLayoutBlock, number>()
+  private readonly capHeights = new Map<string, number>()
 
   private visibleBlocks(): TextLayoutBlock[] {
     return this.blocks.filter((block) => block.visible)
@@ -152,6 +153,7 @@ export class TextLayout {
         block.paragraph.delete()
         block.paragraph = block.rebuild(remaining)
         this.caps.set(block, remaining)
+        this.capHeights.clear()
         block.paragraph.layout(Math.max(1, width - block.inset))
         block.metrics = block.paragraph.getLineMetrics()
       }
@@ -205,20 +207,41 @@ export class TextLayout {
     const visible = this.visibleBlocks()
     const first = visible.at(0)
     const last = visible.at(-1)
-    const firstLine = first?.metrics.at(0)
-    const lastLine = last?.metrics.at(-1)
-    if (this.capHeight === undefined || !first || !last || !firstLine || !lastLine) {
+    if (this.capHeight === undefined || !first || !last) {
       return
     }
-    const firstBaseline = first.y + firstLine.baseline + this.lineOffset(first, 0)
-    const lastBaseline = last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
-    const start = this.toTextIndex(first, firstLine.startIndex)
-    const end = this.toTextIndex(first, firstLine.endIndex)
-    const top = firstBaseline - this.capHeight(start, end)
+    const firstBaseline = this.firstBaseline(first)
+    const lastLine = last.metrics.at(-1)
+    const lastBaseline = lastLine
+      ? last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
+      : firstBaseline
+    const top = firstBaseline - this.firstLineCapHeight(first, this.capHeight)
     for (const block of visible) {
       block.y -= top
     }
     this.placedHeight = lastBaseline - top
+  }
+
+  /** Skia lays an empty paragraph out without lines, but with a baseline. */
+  private firstBaseline(block: TextLayoutBlock): number {
+    const line = block.metrics.at(0)
+    if (!line) {
+      return block.y + block.paragraph.getAlphabeticBaseline()
+    }
+    return block.y + line.baseline + this.lineOffset(block, 0)
+  }
+
+  private firstLineCapHeight(block: TextLayoutBlock, capHeight: LineCapHeight): number {
+    const line = block.metrics.at(0)
+    const start = line ? this.toTextIndex(block, line.startIndex) : block.start
+    const end = line ? this.toTextIndex(block, line.endIndex) : block.start
+    const key = `${start}:${end}`
+    let height = this.capHeights.get(key)
+    if (height === undefined) {
+      height = capHeight(start, end)
+      this.capHeights.set(key, height)
+    }
+    return height
   }
 
   /** The block's line `index` stands this far below where its paragraph has it. */

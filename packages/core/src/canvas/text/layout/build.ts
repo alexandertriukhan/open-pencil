@@ -34,7 +34,7 @@ import type { ParagraphNode } from '#core/canvas/text/paragraph/inputs'
 import type { TextRenderer } from '#core/canvas/text/renderer'
 import { DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE } from '#core/constants'
 import { autoWidthWrapWidth } from '#core/layout/text-measurement'
-import { shownText } from '#core/text/case'
+import { shownSourceIndices, shownText, textCaseSegments } from '#core/text/case'
 import { rangeCapHeight } from '#core/text/character-face'
 import { glyphAdvanceSync } from '#core/text/font/glyphs'
 import { textFontFace } from '#core/text/requirements/collect'
@@ -392,14 +392,31 @@ function trimmedCapHeight(node: ParagraphNode): LineCapHeight | undefined {
   if (node.leadingTrim !== 'CAP_HEIGHT') {
     return undefined
   }
-  return (start, end) => rangeCapHeight(node, start, end)
+  const sourceIndex = shownToSourceIndex(node)
+  return (start, end) => {
+    const sourceStart = sourceIndex(start)
+    const sourceEnd = end > start ? sourceIndex(end - 1) + 1 : sourceStart
+    return rangeCapHeight(node, sourceStart, sourceEnd)
+  }
+}
+
+function shownToSourceIndex(node: ParagraphNode): (shownIndex: number) => number {
+  if (textCaseSegments(node).every((segment) => segment.textCase === 'ORIGINAL')) {
+    return (shownIndex) => Math.min(shownIndex, node.text.length)
+  }
+  let indices: number[] | undefined
+  return (shownIndex) => {
+    indices ??= shownSourceIndices(node)
+    return indices[shownIndex] ?? node.text.length
+  }
 }
 
 /** How many laid-out line boxes fit the fixed height, preserving the first line. */
-function linesWithinHeight(layout: TextLayout, height: number, trimmed: boolean): number {
+function linesWithinHeight(layout: TextLayout, node: ParagraphNode): number {
   const lines = layout.getLineMetrics()
+  const trimmed = node.leadingTrim === 'CAP_HEIGHT'
   const firstOverflow = lines.findIndex(
-    (line) => line.baseline + (trimmed ? 0 : line.descent) > height
+    (line) => line.baseline + (trimmed ? 0 : line.descent) > node.height
   )
   return Math.max(1, firstOverflow === -1 ? lines.length : firstOverflow)
 }
@@ -420,7 +437,7 @@ export function buildParagraph(
   try {
     layoutForNode(layout, node)
     if (heightTruncation) {
-      fittingLines = linesWithinHeight(layout, node.height, node.leadingTrim === 'CAP_HEIGHT')
+      fittingLines = linesWithinHeight(layout, node)
     }
   } catch (error) {
     layout.delete()

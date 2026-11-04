@@ -133,7 +133,6 @@ export interface MeasuredTextLines {
   width: number
   lines: number
   lineHeight: number
-  capHeight: number
 }
 
 export function measureTextWithFont(
@@ -150,7 +149,6 @@ export function measureTextWithFont(
   const scale = fontSize / parsed.face.upem
   const { ascender, descender, lineGap } = lineMetrics(parsed)
   const lineH = lineHeight ?? Math.ceil((ascender - descender + lineGap) * scale)
-  const capHeight = instanceCapHeight(parsed, fontInstance(parsed, [])) * fontSize
 
   let units = 0
   for (const character of text) units += glyphAdvanceUnits(parsed, glyphIndex(parsed, character))
@@ -158,9 +156,9 @@ export function measureTextWithFont(
 
   if (maxWidth && maxWidth > 0 && singleLineWidth > maxWidth) {
     const lines = Math.ceil(singleLineWidth / maxWidth)
-    return { width: maxWidth, lines, lineHeight: lineH, capHeight }
+    return { width: maxWidth, lines, lineHeight: lineH }
   }
-  return { width: Math.ceil(singleLineWidth), lines: 1, lineHeight: lineH, capHeight }
+  return { width: Math.ceil(singleLineWidth), lines: 1, lineHeight: lineH }
 }
 
 /**
@@ -373,7 +371,8 @@ function instanceCapHeight(parsed: HarfBuzzFont, instance: HarfBuzzInstance): nu
   let capHeight = capHeights.get(instance)
   if (capHeight === undefined) {
     const units = instance.font.getMetricPositionWithFallback(parsed.hb.MetricsTag.CAP_HEIGHT)
-    capHeight = units / parsed.face.upem
+    capHeight =
+      Number.isFinite(units) && units > 0 ? units / parsed.face.upem : TYPICAL_CAP_HEIGHT_EMS
     capHeights.set(instance, capHeight)
   }
   return capHeight
