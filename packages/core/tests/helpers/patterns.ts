@@ -1,4 +1,4 @@
-import { expectDefined } from '#core-tests/helpers/assert'
+import { expectDefined } from '@open-pencil/test-support/assert'
 import type { CanvasKit } from 'canvaskit-wasm'
 
 import type { SkiaRenderer } from '@open-pencil/core/canvas'

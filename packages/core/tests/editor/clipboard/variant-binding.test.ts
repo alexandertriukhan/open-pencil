@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from 'bun:test'
 
-import { expectDefined } from '#core-tests/helpers/assert'
+import { expectDefined } from '@open-pencil/test-support/assert'
 
 import { parseFigmaClipboard } from '@open-pencil/fig/clipboard'
 import { createEditor } from '@open-pencil/core/editor'

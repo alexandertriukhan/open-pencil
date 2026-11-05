@@ -69,6 +69,7 @@ function tryStartHandleDrag(
     setDrag(scaleDrag)
     return true
   }
+  // A multi-selection resizes from its bounds' handles, the only ones it draws.
   const resizeDrag =
     editor.state.selectedIds.size > 1
       ? tryStartSelectionResize(cx, cy, editor)

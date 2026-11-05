@@ -15,5 +15,6 @@ test('tiles draw flipped subtrees as a direct render does', async ({ page }) => 
   expect(submission.sceneRenderer).toBe('tiled')
   expect(submission.presentedTiles).toBeGreaterThan(0)
   expect(await scene.differentPixels(pixels, await scene.direct())).toBe(0)
+  expect(pixels).toMatchSnapshot('flipped-subtrees.png')
   canvas.assertNoErrors()
 })

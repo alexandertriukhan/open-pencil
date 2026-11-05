@@ -3,16 +3,13 @@ import { toRaw } from 'vue'
 
 import type { Editor } from '@open-pencil/core'
 import { ROTATION_SNAP_DEGREES } from '@open-pencil/core/constants'
-import { createSceneGeometry, selectionKey } from '@open-pencil/core/geometry'
-import {
-  placeRotatedAbout,
-  selectionPlacement,
-  turnPoint
-} from '@open-pencil/scene-graph/coordinate'
+import { createSceneGeometry } from '@open-pencil/core/geometry'
+import { computeAllLayouts } from '@open-pencil/core/layout'
+import { placeRotatedAbout, selectionPlacement } from '@open-pencil/scene-graph/coordinate'
 import { layerRotates } from '@open-pencil/scene-graph/generated'
 
 import {
-  hitTestFrameRotation,
+  hitTestBoxRotation,
   hitTestCornerRotationByMatrix,
   hitTestTopRotationHandleByMatrix
 } from '#vue/shared/input/geometry'
@@ -92,34 +89,28 @@ function tryStartSelectionRotation(
   cx: number,
   cy: number
 ): boolean {
-  const frame = selectionBox(editor)
-  if (!frame || !hitTestFrameRotation(cx, cy, frame, editor.renderer?.zoom ?? 1)) return false
+  const box = selectionBox(editor)
+  if (!box || !hitTestBoxRotation(cx, cy, box, editor.renderer?.zoom ?? 1)) return false
   const members = compact(
     [...editor.state.selectedIds].map((id) => {
       const node = editor.graph.getNode(id)
-      if (!node || node.locked || !layerRotates(node)) {
-        return undefined
-      }
+      // FigJam keeps sticky notes upright, and a connector follows its ends.
+      if (!node || node.locked || !layerRotates(node)) return undefined
       return { nodeId: id, placement: selectionPlacement(node, editor.graph) }
     })
   )
   if (members.length === 0) return false
-  const { box } = frame
-  const center = turnPoint({ x: box.x + box.width / 2, y: box.y + box.height / 2 }, frame.angle)
-  const startAngle = Math.atan2(cy - center.y, cx - center.x) * (180 / Math.PI)
-  setDrag({
-    type: 'rotate-selection',
-    centerX: center.x,
-    centerY: center.y,
-    startAngle,
-    frame,
-    members
-  })
-  editor.setSelectionRotationPreview(frame)
+  const centerX = box.x + box.width / 2
+  const centerY = box.y + box.height / 2
+  const startAngle = Math.atan2(cy - centerY, cx - centerX) * (180 / Math.PI)
+  setDrag({ type: 'rotate-selection', centerX, centerY, startAngle, members })
   return true
 }
 
-/** Turns every member about the bounds' center; Shift snaps the turn to the rotation step. */
+/**
+ * Turns every member about the box's center; Shift snaps the turn to the rotation step. The box
+ * stays upright around the turning layers, as Figma draws it.
+ */
 export function handleSelectionRotateMove(
   editor: Editor,
   dragState: DragRotateSelection,
@@ -135,14 +126,24 @@ export function handleSelectionRotateMove(
   for (const { nodeId, placement } of d.members) {
     editor.graph.updateNodePreview(nodeId, placeRotatedAbout(placement, pivot, delta))
   }
-  // The box turns with its layers: the same box, its center kept at the pivot in the new frame.
-  const angle = d.frame.angle + delta
-  const { width, height } = d.frame.box
-  const center = turnPoint(pivot, -angle)
-  editor.setSelectionRotationPreview({
-    box: { x: center.x - width / 2, y: center.y - height / 2, width, height },
-    angle
-  })
+  // An auto layout places its turned children again, as the commit's layout will, and Figma's.
+  for (const parentId of autoLayoutParents(editor, d)) {
+    editor.graph.runPreviewUpdates(() => computeAllLayouts(editor.graph, parentId))
+  }
+  editor.requestRepaint()
+}
+
+/** The auto layout frames that place some of the turning layers. */
+function autoLayoutParents(editor: Editor, d: DragRotateSelection): Set<string> {
+  const parents = new Set<string>()
+  for (const { placement } of d.members) {
+    const parentId = placement.node.parentId
+    const parent = parentId ? editor.graph.getNode(parentId) : undefined
+    if (parent && parent.layoutMode !== 'NONE' && placement.node.layoutPositioning !== 'ABSOLUTE') {
+      parents.add(parent.id)
+    }
+  }
+  return parents
 }
 
 function startingPlace({ placement }: DragRotateSelection['members'][number]) {
@@ -153,8 +154,6 @@ function startingPlace({ placement }: DragRotateSelection['members'][number]) {
 /** Commits every member's turn and fits the groups around them, as one undo step. */
 export function commitSelectionRotation(editor: Editor, dragState: DragRotateSelection) {
   const d = toRaw(dragState)
-  const angle = editor.state.selectionRotationPreview?.angle
-  editor.setSelectionRotationPreview(null)
   const finals = d.members.map((member) => {
     const node = editor.graph.getNode(member.nodeId)
     return node ? { member, final: { x: node.x, y: node.y, rotation: node.rotation } } : null
@@ -172,20 +171,6 @@ export function commitSelectionRotation(editor: Editor, dragState: DragRotateSel
       turned.map(({ member }) => editor.graph.getNode(member.nodeId)?.parentId)
     )
     editor.fitEnclosingGroups(new Set(parentIds))
-    // The selection's box stays turned for as long as this selection lasts, as in Figma.
-    if (angle !== undefined) keepSelectionAngle(editor, angle)
-  })
-}
-
-/** Records the angle the selection's box was turned to, undoable with the rotation. */
-function keepSelectionAngle(editor: Editor, angle: number) {
-  const previous = editor.state.selectionAngle
-  const next = { key: selectionKey(editor.state.selectedIds), angle }
-  editor.setSelectionAngle(next)
-  editor.undo.push({
-    label: 'Rotate',
-    forward: () => editor.setSelectionAngle(next),
-    inverse: () => editor.setSelectionAngle(previous)
   })
 }
 
@@ -197,7 +182,7 @@ export function cancelRotationDrag(editor: Editor, dragState: DragState | null) 
     for (const member of toRaw(dragState).members) {
       editor.graph.updateNodePreview(member.nodeId, startingPlace(member))
     }
-    editor.setSelectionRotationPreview(null)
+    editor.requestRepaint()
   }
 }
 

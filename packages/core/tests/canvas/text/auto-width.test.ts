@@ -1,14 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
-import { expectDefined } from '#core-tests/helpers/assert'
 import type { CanvasKit, TypefaceFontProvider } from 'canvaskit-wasm'
 
 import { SceneGraph, type SceneNode } from '@open-pencil/scene-graph'
+import { expectDefined } from '@open-pencil/test-support/assert'
 
 import { measureTextNode } from '#core/canvas/text'
 import { buildParagraph } from '#core/canvas/text/layout/build'
 import type { TextRenderer } from '#core/canvas/text/renderer'
 import { getCanvasKit } from '#core/canvaskit'
+import { FigmaAPI } from '#core/figma-api'
+import { computeAllLayouts } from '#core/layout'
 import { textAutoResizeChanges } from '#core/layout/text-auto-resize'
 import { withTextMeasurer } from '#core/layout/text-measurement'
 import { fontManager } from '#core/text/font/manager'
@@ -175,5 +177,77 @@ describe('text that sizes its own width', () => {
     )
 
     expect([oneLine.width, oneLine.height]).toEqual([fresh.width, fresh.height])
+  })
+
+  // Measured in Figma: auto-width text that reaches its max width takes all of it, wrapping or
+  // truncated, rather than the width of its longest line.
+  const FIGMA_TEXT = { text: 'The quick brown fox jumps over the lazy dog', fontSize: 12 }
+
+  function lines(node: SceneNode): number {
+    const layout = buildParagraph(renderer(), node)
+    try {
+      return layout.getLineMetrics().length
+    } finally {
+      layout.delete()
+    }
+  }
+
+  test('takes its whole max width once its text reaches it, as Figma sizes it', () => {
+    for (const [props, lineCount] of [
+      [{}, 3],
+      [{ textTruncation: 'ENDING', maxLines: 1 }, 1],
+      [{ textTruncation: 'ENDING', maxLines: 2 }, 2]
+    ] as const) {
+      const node = resized(autoWidthText({ ...FIGMA_TEXT, maxWidth: 100, ...props }))
+      expect(node.width).toBe(100)
+      expect(lines(node)).toBe(lineCount)
+    }
+  })
+
+  test('takes its whole max width in an auto layout frame that hugs it', () => {
+    const graph = new SceneGraph()
+    const frame = new FigmaAPI(graph).createFrame()
+    frame.layoutMode = 'VERTICAL'
+    frame.layoutSizingHorizontal = 'HUG'
+    frame.layoutSizingVertical = 'HUG'
+    const text = graph.createNode('TEXT', frame.id, {
+      ...FIGMA_TEXT,
+      fontFamily: 'Inter',
+      lineHeight: null,
+      textAutoResize: 'WIDTH_AND_HEIGHT',
+      textTruncation: 'ENDING',
+      maxLines: 1,
+      maxWidth: 100
+    })
+    withTextMeasurer(
+      (node, maxWidth) => measureTextNode(renderer(), node, maxWidth),
+      () => computeAllLayouts(graph, graph.getPages()[0].id)
+    )
+
+    expect(graph.getNode(text.id)?.width).toBe(100)
+    expect(frame.width).toBe(100)
+  })
+
+  // Measured in Figma: ending truncation on auto-width text makes it one line, so a narrower
+  // max width shortens that line rather than growing the box.
+  test('stays one line when its max width shrinks under ending truncation without a line cap', () => {
+    const wide = resized(
+      autoWidthText({ ...FIGMA_TEXT, maxWidth: 400, textTruncation: 'ENDING', maxLines: null })
+    )
+    const narrow = changed(wide, { maxWidth: 100 })
+
+    expect(lines(wide)).toBe(1)
+    expect([narrow.width, narrow.height]).toEqual([100, wide.height])
+    expect(lines(narrow)).toBe(1)
+  })
+
+  test('keeps the size it has while its fonts are not prepared', () => {
+    const shown = resized(autoWidthText({ ...FIGMA_TEXT }))
+    const pending = withTextMeasurer(
+      () => null,
+      () => textAutoResizeChanges(shown, { maxWidth: 100 })
+    )
+
+    expect(pending.width ?? shown.width).toBe(shown.width)
   })
 })

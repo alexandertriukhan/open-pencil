@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { expectDefined } from '#core-tests/helpers/assert'
+import { expectDefined } from '@open-pencil/test-support/assert'
 import { boundChip, layerNamed, withOwnLayers } from '#core-tests/helpers/bound-variants'
 
 describe('variant bindings in the editor', () => {

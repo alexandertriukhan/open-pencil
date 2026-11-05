@@ -296,9 +296,10 @@ export function getParentToContainerMatrix(
 export interface SelectionPlacement {
   node: SceneNode
   center: Vector
-  /** The layer's own x and y axes on the canvas, as unit vectors (rotation and flips applied). */
-  axisX: Vector
-  axisY: Vector
+  /** Draws the layer from its own (0,0)…(width,height) on the canvas. */
+  world: Mat3
+  /** Draws the layer's parent on the canvas. */
+  parentWorld: Mat3
   /** -1 when the layer is drawn mirrored, so its rotation turns the other way on the canvas. */
   direction: 1 | -1
   /** Maps canvas points into the layer's parent's space, or null when it cannot be inverted. */
@@ -310,28 +311,16 @@ export function selectionPlacement(
   graph: Pick<SceneGraph, 'getNode' | 'rootId'>
 ): SelectionPlacement {
   const world = getWorldMatrix(node, graph)
-  const [cx, cy, ox, oy, xx, xy, yx, yy] = Matrix.mapPoints(world, [
-    node.width / 2,
-    node.height / 2,
-    0,
-    0,
-    1,
-    0,
-    0,
-    1
-  ])
-  const unit = (x: number, y: number): Vector => {
-    const length = Math.hypot(x, y) || 1
-    return { x: x / length, y: y / length }
-  }
+  const [cx, cy] = Matrix.mapPoints(world, [node.width / 2, node.height / 2])
   const parent = node.parentId ? graph.getNode(node.parentId) : undefined
+  const parentWorld = getParentWorldMatrix(parent, graph)
   return {
     node: { ...node },
     center: { x: cx, y: cy },
-    axisX: unit(xx - ox, xy - oy),
-    axisY: unit(yx - ox, yy - oy),
+    world,
+    parentWorld,
     direction: world[0] * world[4] - world[1] * world[3] < 0 ? -1 : 1,
-    parentInverse: Matrix.invert(getParentWorldMatrix(parent, graph))
+    parentInverse: Matrix.invert(parentWorld)
   }
 }
 
@@ -348,32 +337,105 @@ function positionCenteredAt(node: SceneNode, parentInverse: Mat3 | null, center:
   return { x: px - qx, y: py - qy }
 }
 
+export interface ResizedBoundsOptions {
+  /** The layer is locked to its ratio: it scales evenly instead of stretching. */
+  keepRatio?: boolean
+  /** Adjusts a locked layer's sizes, such as to whole pixels. */
+  round?: (size: number) => number
+}
+
+/** Where a layer sits in its parent and how large it is, with its angle and flips. */
+export type LayerPlacement = Pick<
+  SceneNode,
+  'x' | 'y' | 'width' | 'height' | 'rotation' | 'flipX' | 'flipY'
+>
+
 /**
- * The box, in its parent's space, a layer takes when a multi-selection's box `from` is resized to
- * `to`, as Figma scales every selected layer: its center keeps its relative place in the box and
- * its width and height scale along its own axes, so a rotated layer keeps its angle instead of
- * skewing. Both boxes are in the selection frame turned `frameAngle` degrees from the canvas.
+ * Where a layer lands, in its parent's space, when a multi-selection's canvas box `from` is
+ * resized to `to`. Figma scales the layer's whole transform with the box, which skews a rotated
+ * layer under an uneven scale. A layer here cannot skew, so it takes what Figma then reports for
+ * it, and what a `.fig` file of that result opens as: its top-left corner and x axis where the
+ * scale puts them, its width and height the scaled lengths of its own axes, and its y axis square
+ * to its x axis. An even scale, or a layer upright in the box, comes out exactly as in Figma.
  */
 export function placeInResizedBounds(
   placement: SelectionPlacement,
   from: Rect,
   to: Rect,
-  frameAngle = 0
-): Rect {
+  { keepRatio = false, round = (size: number) => size }: ResizedBoundsOptions = {}
+): LayerPlacement {
+  const { node, world, parentWorld } = placement
   const scaleX = from.width > 0 ? to.width / from.width : 1
   const scaleY = from.height > 0 ? to.height / from.height : 1
-  const { node, parentInverse } = placement
-  // Scale along the selection frame's axes: work in the frame, then turn back to the canvas.
-  const center = turnPoint(placement.center, -frameAngle)
-  const axisX = turnPoint(placement.axisX, -frameAngle)
-  const axisY = turnPoint(placement.axisY, -frameAngle)
-  const width = node.width * Math.hypot(scaleX * axisX.x, scaleY * axisX.y)
-  const height = node.height * Math.hypot(scaleX * axisY.x, scaleY * axisY.y)
-  const target = turnPoint(
-    { x: to.x + (center.x - from.x) * scaleX, y: to.y + (center.y - from.y) * scaleY },
-    frameAngle
+  const scale = Matrix.multiply(
+    Matrix.translated(to.x - from.x * scaleX, to.y - from.y * scaleY),
+    Matrix.scaled(scaleX, scaleY)
   )
-  return { ...positionCenteredAt({ ...node, width, height }, parentInverse, target), width, height }
+  const [a, b, tx, c, d, ty] = Matrix.multiply(scale, world)
+  // The scaled axes: x along the first column, y along the second.
+  const xLength = Math.hypot(a, c)
+  const yLength = Math.hypot(b, d)
+  // A layer locked to its ratio scales evenly, by the mean of the box's scales, as in Figma.
+  const even = Math.sqrt(Math.abs(scaleX * scaleY))
+  const width = keepRatio ? round(node.width * even) : node.width * xLength
+  const height = keepRatio ? round(node.height * even) : node.height * yLength
+  const ux = xLength > 0 ? a / xLength : 1
+  const uy = xLength > 0 ? c / xLength : 0
+  const mirrored = a * d - b * c < 0 ? -1 : 1
+  const squared: Mat3 = [ux, -uy * mirrored, tx, uy, ux * mirrored, ty, 0, 0, 1]
+  const sized = { ...node, width, height }
+  const { x, y, rotation, flipX, flipY } =
+    localTransformFromWorld(sized, squared, parentWorld) ?? node
+  return { x, y, width, height, rotation, flipX, flipY }
+}
+
+/** A canvas pointer movement along the layer's own axes, as its handles measure it. */
+export function canvasDeltaInLayer(placement: SelectionPlacement, dx: number, dy: number): Vector {
+  const [a, b, , c, d] = placement.world
+  const det = a * d - b * c
+  if (det === 0) return { x: dx, y: dy }
+  return { x: (d * dx - b * dy) / det, y: (a * dy - c * dx) / det }
+}
+
+/**
+ * Where a layer lands when one of its handles resizes it in its own frame, from `from` to `to`,
+ * both its box in its parent's axes as an upright layer would have it. `to` is signed: a handle
+ * dragged past the opposite edge gives a negative size and mirrors the layer, as Figma flips it.
+ * The edges the handle leaves stay where they are on the canvas, whatever the layer's angle.
+ */
+export function placeInResizedFrame(
+  placement: SelectionPlacement,
+  from: Rect,
+  to: Rect
+): LayerPlacement {
+  const { node, world, parentWorld } = placement
+  const width = Math.abs(to.width)
+  const height = Math.abs(to.height)
+  const mirrorX = to.width < 0
+  const mirrorY = to.height < 0
+  const turned = node.rotation !== 0 || node.flipX || node.flipY
+  if (!turned && !mirrorX && !mirrorY) {
+    return { x: to.x, y: to.y, width, height, rotation: 0, flipX: false, flipY: false }
+  }
+  const placed = Matrix.multiply(
+    Matrix.multiply(world, Matrix.translated(to.x - from.x, to.y - from.y)),
+    Matrix.scaled(mirrorX ? -1 : 1, mirrorY ? -1 : 1)
+  )
+  const local = localTransformFromWorld({ ...node, width, height }, placed, parentWorld)
+  if (!local)
+    return { ...to, width, height, rotation: node.rotation, flipX: node.flipX, flipY: node.flipY }
+  // Unmirrored, the angle and flips stay exactly as they were; only the position follows.
+  return mirrorX || mirrorY
+    ? { ...local, width, height }
+    : {
+        x: local.x,
+        y: local.y,
+        width,
+        height,
+        rotation: node.rotation,
+        flipX: node.flipX,
+        flipY: node.flipY
+      }
 }
 
 /**
@@ -396,82 +458,4 @@ export function placeRotatedAbout(
   const turned = node.rotation + degrees * direction
   const rotation = ((((turned + 180) % 360) + 360) % 360) - 180
   return { ...positionCenteredAt({ ...node, rotation }, parentInverse, target), rotation }
-}
-
-/**
- * A multi-selection's box in its own frame: `box` in coordinates turned `angle` degrees from the
- * canvas, so canvas = rotate(angle) · frame. An upright selection has angle 0 and its box is its
- * axis-aligned bounds.
- */
-export interface SelectionFrame {
-  box: Rect
-  angle: number
-}
-
-const FRAME_ANGLE_TOLERANCE = 1e-3
-
-function normalizeDegrees(angle: number): number {
-  return ((((angle + 180) % 360) + 360) % 360) - 180
-}
-
-/** A point turned `angle` degrees about the canvas origin. */
-export function turnPoint(point: Vector, angle: number): Vector {
-  const radians = (angle * Math.PI) / 180
-  const cos = Math.cos(radians)
-  const sin = Math.sin(radians)
-  return { x: point.x * cos - point.y * sin, y: point.x * sin + point.y * cos }
-}
-
-/** The angle a layer's x axis is drawn at on the canvas, or null when the layer is mirrored. */
-function drawnAngle(node: SceneNode, graph: Pick<SceneGraph, 'getNode'>): number | null {
-  const m = getWorldMatrix(node, graph)
-  if (m[0] * m[4] - m[1] * m[3] < 0) return null
-  return (Math.atan2(m[3], m[0]) * 180) / Math.PI
-}
-
-/** The layers' tight box in the frame turned `angle` degrees from the canvas. */
-export function selectionFrameAt(
-  nodes: readonly SceneNode[],
-  graph: Pick<SceneGraph, 'getNode'>,
-  angle: number
-): SelectionFrame {
-  const points = nodes.flatMap((node) =>
-    Matrix.mapPoints(getWorldMatrix(node, graph), cornersOf(node))
-  )
-  const framed: number[] = []
-  for (let i = 0; i < points.length; i += 2) {
-    const { x, y } = turnPoint({ x: points[i], y: points[i + 1] }, -angle)
-    framed.push(x, y)
-  }
-  return { box: boundsOfPoints(framed), angle }
-}
-
-/**
- * A multi-selection's frame as Figma draws it: turned to `angle` when a rotation left the selection
- * there, else to the angle every selected layer shares on the canvas, or upright when their angles
- * differ or any is mirrored.
- */
-export function selectionFrame(
-  nodes: readonly SceneNode[],
-  graph: Pick<SceneGraph, 'getNode'>,
-  angle?: number
-): SelectionFrame {
-  if (angle !== undefined) {
-    const turned = normalizeDegrees(angle)
-    return selectionFrameAt(nodes, graph, Math.abs(turned) < FRAME_ANGLE_TOLERANCE ? 0 : turned)
-  }
-  const angles = nodes.map((node) => drawnAngle(node, graph))
-  const first = angles.at(0)
-  const shared =
-    first !== null &&
-    first !== undefined &&
-    angles.every(
-      (angle) => angle !== null && Math.abs(normalizeDegrees(angle - first)) < FRAME_ANGLE_TOLERANCE
-    )
-  const sharedAngle = shared ? normalizeDegrees(first) : 0
-  return selectionFrameAt(
-    nodes,
-    graph,
-    Math.abs(sharedAngle) < FRAME_ANGLE_TOLERANCE ? 0 : sharedAngle
-  )
 }

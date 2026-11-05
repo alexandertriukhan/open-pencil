@@ -1,16 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { createEditor, type Editor } from '@open-pencil/core/editor'
+import { compact, mapValues } from 'es-toolkit'
+
+import { createEditor, type Editor } from '@open-pencil/core'
 import type { SceneNode } from '@open-pencil/scene-graph'
-import { turnPoint } from '@open-pencil/scene-graph/coordinate'
+import { getAxisAlignedWorldBounds, getWorldMatrix } from '@open-pencil/scene-graph/coordinate'
+import Matrix from '@open-pencil/scene-graph/matrix'
 
 import {
   applySelectionResize,
   cancelSelectionResize,
   commitSelectionResize,
-  selectionBox,
+  selectionResizeHandleAt,
   tryStartSelectionResize
 } from '#vue/shared/input/resize/selection'
+import { handleSelectDown, type HitTestFns } from '#vue/shared/input/select'
+import type { DragState } from '#vue/shared/input/types'
 
 let editor: Editor
 
@@ -91,6 +96,21 @@ describe('resizing a multi-selection from its bounds', () => {
     expect(box(editor.graph.getNode(b))).toEqual({ x: 100, y: 100, width: 50, height: 50 })
   })
 
+  test('the moving edge snaps to another layer’s edge, and Control keeps it free', () => {
+    const { b } = setup()
+    const page = editor.state.currentPageId
+    editor.graph.createNode('RECTANGLE', page, { x: 300, y: 0, width: 50, height: 50 })
+    const drag = start(150, 75)
+    // The right edge dragged to x 297, within reach of the other layer's left edge at 300.
+    applySelectionResize(drag, 297, 75, false, editor)
+    expect(box(editor.graph.getNode(b)).x + box(editor.graph.getNode(b)).width).toBe(300)
+    expect(editor.state.snapGuides.length).toBeGreaterThan(0)
+
+    applySelectionResize(drag, 297, 75, false, editor, true)
+    expect(box(editor.graph.getNode(b)).x + box(editor.graph.getNode(b)).width).toBe(297)
+    expect(editor.state.snapGuides).toEqual([])
+  })
+
   test('a press inside the bounds, on a layer’s own corner, starts no resize', () => {
     setup()
     // The first layer's bottom-right corner lies inside the bounds, where no handle is drawn.
@@ -122,8 +142,9 @@ describe('resizing a multi-selection inside a group', () => {
   })
 })
 
-describe('resizing a multi-selection whose layers share an angle', () => {
-  test('its turned box resizes along its own axes and the layers keep their angle', () => {
+describe('stretching a multi-selection with a turned layer', () => {
+  /** A square turned 45° beside an upright one; the box's right edge is at x 200. */
+  function turned() {
     editor = createEditor()
     const page = editor.state.currentPageId
     const a = editor.graph.createNode('RECTANGLE', page, {
@@ -131,55 +152,145 @@ describe('resizing a multi-selection whose layers share an angle', () => {
       y: 0,
       width: 50,
       height: 50,
-      rotation: 30
+      rotation: 45
     })
-    const b = editor.graph.createNode('RECTANGLE', page, {
-      x: 100,
-      y: 0,
-      width: 50,
-      height: 50,
-      rotation: 30
-    })
+    const b = editor.graph.createNode('RECTANGLE', page, { x: 150, y: 0, width: 50, height: 50 })
     editor.select([a.id, b.id])
-    const frame = selectionBox(editor)
-    if (!frame) throw new Error('expected a selection box')
-    expect(frame.angle).toBeCloseTo(30, 6)
+    return { a: a.id, b: b.id }
+  }
 
-    // The box's bottom-right corner, turned onto the canvas.
-    const corner = turnPoint(
-      { x: frame.box.x + frame.box.width, y: frame.box.y + frame.box.height },
-      frame.angle
-    )
-    const drag = start(corner.x, corner.y)
-    expect(drag.handle).toBe('se')
-    // 100 along the box's own x axis.
-    const along = turnPoint({ x: 100, y: 0 }, frame.angle)
-    applySelectionResize(drag, corner.x + along.x, corner.y + along.y, false, editor)
+  test('turns the layer as Figma reports it, and one undo puts its angle back', () => {
+    const { a } = turned()
+    const drag = start(200, 25)
+    expect(drag.handle).toBe('e')
+    // Doubling the box's width stretches the turned square's axes to (2, 1) and (−2, 1) over √2;
+    // Control keeps the edge off the pixel grid.
+    applySelectionResize(drag, 200 + drag.origBounds.width, 25, false, editor, true)
     commitSelectionResize(drag, editor)
+    const node = editor.graph.getNode(a)
+    expect(node?.rotation).toBeCloseTo((Math.atan2(1, 2) * 180) / Math.PI, 6)
+    expect(node?.width).toBeCloseTo((50 * Math.sqrt(5)) / Math.SQRT2, 6)
 
-    expect(editor.graph.getNode(a.id)?.rotation).toBeCloseTo(30, 6)
-    expect(editor.graph.getNode(b.id)?.rotation).toBeCloseTo(30, 6)
-    const after = selectionBox(editor)
-    expect(after?.angle).toBeCloseTo(30, 6)
-    expect(after?.box.width).toBeCloseTo(frame.box.width + 100, 6)
-    expect(after?.box.height).toBeCloseTo(frame.box.height, 6)
+    editor.undo.undo()
+    expect(editor.graph.getNode(a)?.rotation).toBe(45)
+    expect(box(editor.graph.getNode(a))).toEqual({ x: 0, y: 0, width: 50, height: 50 })
+  })
+
+  test('cancelling puts its angle back', () => {
+    const { a } = turned()
+    const drag = start(200, 25)
+    applySelectionResize(drag, 200 + drag.origBounds.width, 25, false, editor, true)
+    cancelSelectionResize(drag, editor)
+    expect(editor.graph.getNode(a)?.rotation).toBe(45)
+    expect(box(editor.graph.getNode(a))).toEqual({ x: 0, y: 0, width: 50, height: 50 })
   })
 })
 
-describe('resizing a multi-selection with a sticky note', () => {
-  test('leaves the sticky note at its size', () => {
-    const { a } = setup()
-    const sticky = editor.graph.createNode('STICKY', editor.state.currentPageId, {
+describe('dragging a multi-selection’s edge past the opposite one', () => {
+  test('mirrors the selection: the layers swap sides and each is flipped, in one undo step', () => {
+    const { a, b } = setup()
+    // The right edge from x 150 to x −75: the box mirrors to −75…0, at half its width.
+    const drag = start(150, 75)
+    applySelectionResize(drag, -75, 75, false, editor)
+    commitSelectionResize(drag, editor)
+    const world = (id: string) => {
+      const node = editor.graph.getNode(id)
+      if (!node) throw new Error('missing layer')
+      const bounds = getAxisAlignedWorldBounds(node, editor.graph)
+      return mapValues(bounds, (value) => Math.round(value * 1e6) / 1e6)
+    }
+    expect(world(a)).toEqual({ x: -25, y: 0, width: 25, height: 50 })
+    expect(world(b)).toEqual({ x: -75, y: 100, width: 25, height: 50 })
+    // Drawn mirrored: the layer's own x axis now runs right to left on the canvas.
+    const node = editor.graph.getNode(a)
+    if (!node) throw new Error('missing layer')
+    const [x0, , x1] = Matrix.mapPoints(getWorldMatrix(node, editor.graph), [0, 0, 1, 0])
+    expect(x1).toBeLessThan(x0)
+
+    editor.undo.undo()
+    expect(box(editor.graph.getNode(a))).toEqual({ x: 0, y: 0, width: 50, height: 50 })
+    expect(editor.graph.getNode(a)?.rotation).toBe(0)
+    expect(editor.graph.getNode(a)?.flipY).toBe(false)
+  })
+})
+
+describe('stretching a multi-selection with a layer locked to its ratio', () => {
+  test('the locked layer scales evenly from its corner, as Figma measured', () => {
+    editor = createEditor()
+    const page = editor.state.currentPageId
+    const a = editor.graph.createNode('RECTANGLE', page, {
       x: 100,
       y: 100,
-      width: 50,
-      height: 50
+      width: 100,
+      height: 50,
+      targetAspectRatio: { x: 100, y: 50 }
     })
-    editor.select([a, sticky.id])
-    const drag = start(150, 150)
-    applySelectionResize(drag, 300, 300, false, editor)
+    const b = editor.graph.createNode('RECTANGLE', page, { x: 300, y: 200, width: 50, height: 100 })
+    editor.select([a.id, b.id])
+    // Figma 126, the box's right edge dragged from 350 to 600: the free layer stretches to
+    // 100 × 100, the locked one scales by √2 to 141 × 71, its corner kept at (100, 100).
+    const drag = start(350, 200)
+    applySelectionResize(drag, 600, 200, false, editor)
     commitSelectionResize(drag, editor)
-    expect(box(editor.graph.getNode(sticky.id))).toEqual({ x: 100, y: 100, width: 50, height: 50 })
-    expect(box(editor.graph.getNode(a))).toEqual({ x: 0, y: 0, width: 100, height: 100 })
+    expect(box(editor.graph.getNode(a.id))).toEqual({ x: 100, y: 100, width: 141, height: 71 })
+    expect(box(editor.graph.getNode(b.id))).toEqual({ x: 500, y: 200, width: 100, height: 100 })
+  })
+})
+
+describe('a press on a multi-selection’s handle that does not move', () => {
+  test('records nothing and keeps the layers’ imported geometry', () => {
+    const { a, b } = setup()
+    const layers = compact([a, b].map((id) => editor.graph.getNode(id)))
+    editor.graph.applyImportedStateDuring(() => {
+      for (const node of layers) node.source.fig.rawNodeFields.vectorData = { imported: true }
+    })
+    const before = editor.undo.canUndo
+    const drag = start(150, 150)
+    commitSelectionResize(drag, editor)
+    expect(editor.undo.canUndo).toBe(before)
+    expect(editor.graph.getNode(a)?.source.fig.rawNodeFields.vectorData).toEqual({ imported: true })
+  })
+})
+
+describe('the multi-selection box’s handles', () => {
+  test('show no resize cursor when no selected layer can take it', () => {
+    const { a, b } = setup()
+    for (const id of [a, b]) editor.graph.updateNode(id, { locked: true })
+    expect(selectionResizeHandleAt(150, 150, editor)).toBeNull()
+  })
+
+  test('a press inside the box, on a member’s corner, moves the selection instead', () => {
+    setup()
+    const fns: HitTestFns = {
+      hitTestLayer: (cx, cy) =>
+        editor.graph.hitTestSelectable(
+          cx,
+          cy,
+          editor.state.currentPageId,
+          editor.state.selectedIds
+        ),
+      hitTestFrameTitle: () => null,
+      hitTestSectionTitle: () => null,
+      hitTestComponentLabel: () => null
+    }
+    const press = { shiftKey: false, altKey: false, metaKey: false, ctrlKey: false } as MouseEvent
+    let drag: DragState | null = null
+    // The first layer's bottom-right corner, inside the box, where no handle is drawn.
+    handleSelectDown(
+      press,
+      50,
+      50,
+      50,
+      50,
+      editor,
+      fns,
+      () => false,
+      () => false,
+      (next) => {
+        drag = next
+      }
+    )
+    expect((drag as DragState | null)?.type).not.toBe('resize')
+    expect((drag as DragState | null)?.type).not.toBe('resize-selection')
   })
 })

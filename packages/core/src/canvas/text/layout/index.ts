@@ -11,11 +11,27 @@ import type {
 } from 'canvaskit-wasm'
 
 import {
+  figmaLineBox,
   placeLines,
   shapedLinesByLine,
+  wholePixelShift,
   type BlockPlacement,
   type TextLayoutBlockLines
 } from '#core/canvas/text/layout/lines'
+
+/** How a block is drawn: each line's shift, `null` for one without glyphs, and its marker's. */
+interface BlockDrawing {
+  lines: Array<number | null>
+  marker: number
+}
+
+/** Fractions of a pixel a text is drawn below its top at that keep their drawing. */
+const MAX_DRAWN_FRACTIONS = 4
+
+/** The shift of the first line from `line` on that draws glyphs. */
+function firstShift(drawn: BlockDrawing | undefined, line: number): number {
+  return drawn?.lines.slice(line).find((shift) => shift !== null) ?? 0
+}
 
 /** A list item's number or bullet, laid out on its own. */
 export interface TextLayoutMarker {
@@ -82,6 +98,11 @@ export class TextLayout {
   private lineOffsets: number[] = []
   private truncated = false
   private readonly placements = new Map<TextLayoutBlock, BlockPlacement>()
+  /**
+   * How each block is drawn below a top of a given fraction of a pixel, worked out on the first
+   * draw there after a layout (`prepareDrawing`).
+   */
+  private readonly drawing = new Map<number, Map<TextLayoutBlock, BlockDrawing>>()
   /** The text's height when layout placed its lines itself. */
   private placedHeight: number | null = null
 
@@ -165,6 +186,7 @@ export class TextLayout {
       lines += block.metrics.length
     }
     this.placeLines(width)
+    this.alignFirstBaseline()
     this.trimToCapHeight()
     for (const block of this.visibleBlocks()) this.placeMarker(block)
     this.collectLines()
@@ -185,6 +207,7 @@ export class TextLayout {
       for (const piece of placement.pieces ?? []) piece.paragraph.delete()
     }
     this.placements.clear()
+    this.drawing.clear()
     this.placedHeight = null
     this.height = null
   }
@@ -194,18 +217,34 @@ export class TextLayout {
    * otherwise (`placeLines`).
    */
   private placeLines(width: number): void {
-    const visible = this.visibleBlocks()
-    const first = visible.at(0)
-    // A trimmed box starts at the first line's cap height, so its baselines round from there.
-    const capHeight =
-      this.capHeight && first ? this.firstLineCapHeight(first, this.capHeight) : undefined
-    const placed = placeLines(this.ck, visible, width, capHeight)
+    const placed = placeLines(this.ck, this.visibleBlocks(), width)
     if (!placed) return
     for (const [block, { y, ...placement }] of placed.blocks) {
       block.y = y
       this.placements.set(block, placement)
     }
     this.placedHeight = placed.height
+  }
+
+  /**
+   * Puts the first baseline where Figma does, its font centred in its line height, when lines
+   * keep the paragraph's placement, which centres it a little apart. The height stays, but a
+   * single line is as tall as its line height, which a paragraph rounds and ignores at zero.
+   */
+  private alignFirstBaseline(): void {
+    if (this.placedHeight !== null) return
+    const visible = this.visibleBlocks()
+    const first = visible.at(0)
+    const line = first?.metrics.at(0)
+    const heights = first?.lines?.heights
+    if (!first || !line || !heights) return
+    const box = figmaLineBox(this.ck, first.paragraph, line, heights, first.metrics)
+    if (!box) return
+    const single = visible.length === 1 && first.metrics.length === 1
+    const shift = box.ascent - this.firstBaseline(first)
+    if (shift === 0 && !single) return
+    this.placedHeight = single ? box.height : this.measureHeight()
+    for (const block of visible) block.y += shift
   }
 
   /** Trims the text from its first line's cap height to its last baseline, as Figma does. */
@@ -221,15 +260,14 @@ export class TextLayout {
     const lastBaseline = lastLine
       ? last.y + lastLine.baseline + this.lineOffset(last, last.metrics.length - 1)
       : firstBaseline
-    // Figma ends the box at the last baseline and makes it the trimmed height to the nearest
-    // pixel, so the rest of the first line's cap height stands above it (Figma desktop 126).
-    const capTop = firstBaseline - this.firstLineCapHeight(first, this.capHeight)
-    const height = Math.round(lastBaseline - capTop)
-    const top = lastBaseline - height
+    // Figma starts the box at the first line's cap height and makes it as tall as the last
+    // baseline stands below that, to the nearest pixel, so the last baseline drawn on a whole
+    // pixel ends it (Figma desktop 126).
+    const top = firstBaseline - this.firstLineCapHeight(first, this.capHeight)
     for (const block of visible) {
       block.y -= top
     }
-    this.placedHeight = height
+    this.placedHeight = Math.round(lastBaseline - top)
   }
 
   /** Skia lays an empty paragraph out without lines, but with a baseline. */
@@ -563,15 +601,57 @@ export class TextLayout {
     return markers
   }
 
-  draw(canvas: Canvas, x: number, y: number): void {
+  /**
+   * Works out how far each block's lines and marker move when the text is drawn `top` down, so
+   * every baseline lands on the whole pixel of the box its exact one rounds to, as Figma draws it,
+   * a vertical alignment's offset included. Lines a paragraph or piece draws together step by
+   * whole pixels both as it draws them and as they are placed, so they move as one.
+   */
+  private prepareDrawing(top: number): Map<TextLayoutBlock, BlockDrawing> {
+    const fraction = top - Math.floor(top)
+    const cached = this.drawing.get(fraction)
+    if (cached) return cached
+    const drawing = new Map<TextLayoutBlock, BlockDrawing>()
     for (const block of this.visibleBlocks()) {
+      const shaped = shapedLinesByLine(block.paragraph)
+      const lines = block.metrics.map((line, index) => {
+        const drawn = shaped[index]
+        if (!drawn || drawn.runs.length === 0) return null
+        const lineTop = fraction + block.y + this.lineOffset(block, index)
+        return wholePixelShift(lineTop, line.baseline, drawn.baseline)
+      })
+      drawing.set(block, { lines, marker: this.markerShift(block, fraction) })
+    }
+    if (this.drawing.size >= MAX_DRAWN_FRACTIONS) this.drawing.clear()
+    this.drawing.set(fraction, drawing)
+    return drawing
+  }
+
+  private markerShift(block: TextLayoutBlock, fraction: number): number {
+    const marker = block.marker
+    const line = marker?.paragraph.getLineMetrics().at(0)
+    const drawn = marker ? shapedLinesByLine(marker.paragraph).at(0) : undefined
+    if (!marker || !line || !drawn) return 0
+    return wholePixelShift(fraction + marker.y, line.baseline, drawn.baseline)
+  }
+
+  /** Draws the text with every baseline on a whole pixel of its box, as Figma does. */
+  draw(canvas: Canvas, x: number, y: number): void {
+    const drawing = this.prepareDrawing(y)
+    for (const block of this.visibleBlocks()) {
+      const drawn = drawing.get(block)
       const pieces = this.placements.get(block)?.pieces
-      if (!pieces) canvas.drawParagraph(block.paragraph, x + block.x, y + block.y)
+      if (!pieces) {
+        canvas.drawParagraph(block.paragraph, x + block.x, y + block.y + firstShift(drawn, 0))
+      }
       for (const piece of pieces ?? []) {
-        canvas.drawParagraph(piece.paragraph, x + block.x + piece.x, y + block.y + piece.y)
+        const top = y + block.y + piece.y + firstShift(drawn, piece.line)
+        canvas.drawParagraph(piece.paragraph, x + block.x + piece.x, top)
       }
       const marker = block.marker
-      if (marker) canvas.drawParagraph(marker.paragraph, x + marker.x, y + marker.y)
+      if (marker) {
+        canvas.drawParagraph(marker.paragraph, x + marker.x, y + marker.y + (drawn?.marker ?? 0))
+      }
     }
   }
 

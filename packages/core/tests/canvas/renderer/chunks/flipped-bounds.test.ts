@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 
-import { expectDefined } from '#core-tests/helpers/assert'
+import { expectDefined } from '@open-pencil/test-support/assert'
 
 import { SkiaRenderer } from '#core/canvas'
 import { recordRenderChunk, RenderChunkIndex } from '#core/canvas/renderer/chunks'
@@ -221,6 +221,47 @@ describe('render chunk bounds of flipped nodes', () => {
       expect(bounds.maxY).toBeGreaterThanOrEqual(childBox.maxY - 1e-6)
     }
     expect(differentPixels(renderChunked(graph, pageId), renderDirect(graph, pageId))).toBe(0)
+  })
+
+  test('a flipped parent that does not clip holds a child past its edge', () => {
+    const { graph, pageId } = emptyPage()
+    const parent = graph.createNode('FRAME', pageId, {
+      x: 40,
+      y: 30,
+      width: 120,
+      height: 80,
+      flipX: true,
+      clipsContent: false,
+      fills: solid(0.95, 0.9, 0.8)
+    })
+    const child = graph.createNode('RECTANGLE', parent.id, {
+      x: 110,
+      y: 30,
+      width: 30,
+      height: 10,
+      fills: solid(0.9, 0.1, 0.1)
+    })
+
+    const childBox = worldBox(graph, child)
+    const parentBox = worldBox(graph, parent)
+    expect(childBox.minX).toBeLessThan(parentBox.minX)
+    const { index } = RenderChunkIndex.build(graph, pageId)
+    try {
+      const parentChunk = expectDefined(index.getChunksForNode(parent.id)[0], 'parent chunk')
+      const pastTheEdge = { ...childBox, maxX: parentBox.minX - 1 }
+      expect(index.search(pastTheEdge)).toContain(parentChunk)
+    } finally {
+      index.dispose()
+    }
+    const pixels = renderChunked(graph, pageId)
+    const pastTheEdgeCenter = [
+      (childBox.minX + parentBox.minX) / 2,
+      (childBox.minY + childBox.maxY) / 2
+    ]
+    const [red, green] = pixelAt(pixels, pastTheEdgeCenter[0], pastTheEdgeCenter[1])
+    expect(red).toBeGreaterThan(200)
+    expect(green).toBeLessThan(80)
+    expect(differentPixels(pixels, renderDirect(graph, pageId))).toBe(0)
   })
 
   test('a flipped clipping frame bounds its clipped children by its own drawn box', () => {

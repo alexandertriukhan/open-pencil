@@ -128,9 +128,8 @@ function fittedBox(
       groupBounds(graph, children, parentId, group)
     return { box, shift: { x: box.x - group.x, y: box.y - group.y } }
   }
-  const layers = groupBoundingLayers(children)
-  if (group.type === 'BOOLEAN_OPERATION' || layers.length === 0) return null
-  const local = getAxisAlignedBoundsInParent(layers, group.id, graph)
+  if (group.type === 'BOOLEAN_OPERATION') return null
+  const local = groupBounds(graph, children, group.id, { x: 0, y: 0 })
   const [px, py] = Matrix.mapPoints(getNodeLocalMatrix(group), [local.x, local.y])
   const sized = { ...group, width: local.width, height: local.height }
   const [qx, qy] = Matrix.mapPoints(getNodeLocalMatrix(sized, { x: 0, y: 0 }), [0, 0])
@@ -138,6 +137,12 @@ function fittedBox(
     box: { x: px - qx, y: py - qy, width: local.width, height: local.height },
     shift: { x: local.x, y: local.y }
   }
+}
+
+const FIT_TOLERANCE = 1e-9
+
+function unchanged(value: number, previous: number): boolean {
+  return Math.abs(value - previous) <= FIT_TOLERANCE * Math.max(1, Math.abs(previous))
 }
 
 /** Moves the group to its children's bounds, shifting them back so they stay put. */
@@ -152,7 +157,13 @@ function fitGroup(
   const fitted = fittedBox(graph, group, group.parentId, children, options)
   if (!fitted) return
   const { box, shift } = fitted
-  if (shift.x === 0 && shift.y === 0 && box.width === group.width && box.height === group.height) {
+  // A rotated group's frame leaves rounding residue; a fit within it changes nothing.
+  if (
+    unchanged(shift.x, 0) &&
+    unchanged(shift.y, 0) &&
+    unchanged(box.width, group.width) &&
+    unchanged(box.height, group.height)
+  ) {
     return
   }
   for (const node of [group, ...children]) {
