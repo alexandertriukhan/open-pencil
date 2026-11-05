@@ -1,7 +1,6 @@
-import { guid } from '#fig-tests/helpers/guid'
-
 import type { GUID } from '@open-pencil/kiwi/fig'
 import type { NodeChange } from '@open-pencil/kiwi/fig/codec'
+import { guid } from '@open-pencil/test-support/fig/guid'
 
 export const DENSITY = guid(10)
 export const COMPACT = guid(11)

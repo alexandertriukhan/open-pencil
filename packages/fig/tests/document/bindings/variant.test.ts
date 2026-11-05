@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 
-import { expectDefined } from '#fig-tests/helpers/assert'
 import {
   boundBadgeRecords,
   COMPACT_PANEL,
@@ -16,6 +15,7 @@ import { materializeDocument } from '@open-pencil/fig'
 import type { GUID } from '@open-pencil/kiwi/fig'
 import { guidToString } from '@open-pencil/kiwi/fig/guid'
 import type { SceneGraph, SceneNode } from '@open-pencil/scene-graph'
+import { expectDefined } from '@open-pencil/test-support/assert'
 
 function imported() {
   const { graph, sources } = materializeDocument(boundBadgeRecords())

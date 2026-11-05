@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { expectDefined } from '#fig-tests/helpers/assert'
 import { sceneNodeToKiwi, variantBindingsOf } from '#fig/node-change/index'
 
 import type { NodeChange, VariableConsumptionEntry } from '@open-pencil/kiwi/fig/codec'
 import { guidToString } from '@open-pencil/kiwi/fig/guid'
 import { SceneGraph, type SceneNode } from '@open-pencil/scene-graph'
+import { expectDefined } from '@open-pencil/test-support/assert'
 
 function chipFile() {
   const graph = new SceneGraph()

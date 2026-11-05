@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 
-import { guid } from '#fig-tests/helpers/guid'
 import { applyDocumentTextStyleBindings } from '#fig/document/bindings/style'
 import { materializeDocument } from '#fig/document/materialize'
 
@@ -9,6 +8,7 @@ import { guidToString } from '@open-pencil/kiwi/fig/guid'
 import { SceneGraph } from '@open-pencil/scene-graph'
 import { createDefaultSourceMetadata } from '@open-pencil/scene-graph/node-defaults'
 import type { GUID } from '@open-pencil/scene-graph/primitives'
+import { guid } from '@open-pencil/test-support/fig/guid'
 
 const page = guid(1)
 const frame = guid(2)

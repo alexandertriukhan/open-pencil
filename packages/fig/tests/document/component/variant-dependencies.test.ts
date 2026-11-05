@@ -11,7 +11,6 @@ import {
   sizeBinding,
   SMALL_DOT
 } from '#fig-tests/helpers/bound-variants'
-import { guid } from '#fig-tests/helpers/guid'
 import { collectSceneDependencies } from '#fig/document/dependency-closure'
 import { createSourceIndex } from '#fig/instance-overrides/source-index'
 import { symbolOverridesOf } from '#fig/instance-overrides/types'
@@ -19,6 +18,7 @@ import { symbolOverridesOf } from '#fig/instance-overrides/types'
 import type { GUID } from '@open-pencil/kiwi/fig'
 import type { NodeChange } from '@open-pencil/kiwi/fig/codec'
 import { guidToString } from '@open-pencil/kiwi/fig/guid'
+import { guid } from '@open-pencil/test-support/fig/guid'
 
 function loaded(changes: NodeChange[]): (id: GUID) => boolean {
   const { contentIds } = collectSceneDependencies(changes, undefined, createSourceIndex(changes))

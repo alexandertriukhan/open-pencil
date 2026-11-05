@@ -1,6 +1,6 @@
 import { expectDefined } from '@open-pencil/test-support/assert'
 
-import { createEditor } from '@open-pencil/core/editor'
+import { createEditor } from '#core/editor'
 
 export function boundChip(depth = 0, fanOut = 1) {
   const editor = createEditor()

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import { expectDefined } from '@open-pencil/test-support/assert'
 
-import { createEditor } from '@open-pencil/core/editor'
+import { createEditor } from '#core/editor'
 import { exportFigFile } from '@open-pencil/core/io/formats/fig'
 import { parseFigBuffer } from '@open-pencil/fig'
 import { symbolOverridesOf } from '@open-pencil/fig/instance-overrides'

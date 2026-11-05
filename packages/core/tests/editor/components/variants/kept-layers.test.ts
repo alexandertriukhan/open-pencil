@@ -5,7 +5,7 @@ import { badgedCard, layerNamed, withOwnLayers } from '#core-tests/helpers/bound
 
 import { FigmaAPI } from '@open-pencil/core/figma-api'
 import { buildOpenPencilClipboardHTML } from '@open-pencil/core/clipboard'
-import { createEditor } from '@open-pencil/core/editor'
+import { createEditor } from '#core/editor'
 import { instanceMainComponent, keptNodeCount } from '@open-pencil/scene-graph/instances'
 import { DEFAULT_HISTORY_LIMIT } from '@open-pencil/scene-graph/undo'
 import { reconcileVariableBindings } from '@open-pencil/scene-graph/variables'

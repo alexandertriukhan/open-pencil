@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import { guid } from '#fig-tests/helpers/guid'
 import { interpretInstance } from '#fig/instance-overrides/interpret'
 
 import type { NodeChange, VariableConsumptionEntry } from '@open-pencil/kiwi/fig/codec'
+import { guid } from '@open-pencil/test-support/fig/guid'
 
 const NARROW_WIDTH = guid(50)
 const WIDE_WIDTH = guid(51)

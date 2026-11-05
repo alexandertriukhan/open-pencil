@@ -3,7 +3,7 @@ import { beforeAll, expect, test } from 'bun:test'
 import { expectDefined } from '@open-pencil/test-support/assert'
 
 import { parseFigmaClipboard } from '@open-pencil/fig/clipboard'
-import { createEditor } from '@open-pencil/core/editor'
+import { createEditor } from '#core/editor'
 import { exportFigFile, parseFigFile } from '@open-pencil/core/io/formats/fig'
 import { initCodec } from '@open-pencil/kiwi/fig/codec'
 import { parseFigBuffer } from '@open-pencil/fig'
