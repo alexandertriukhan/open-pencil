@@ -1,3 +1,5 @@
+import { uniq } from 'es-toolkit/array'
+
 import type { ComponentPropertyDefinition, ComponentPropertyType } from '@open-pencil/scene-graph'
 import { findInstanceAncestor } from '@open-pencil/scene-graph/instances'
 import { cloneInstanceOverrideState } from '@open-pencil/scene-graph/instances/overrides'
@@ -33,6 +35,7 @@ import {
   getComponentSetVariantConflicts,
   getComponentSetVariants,
   getDefaultVariantForComponentSet,
+  getVariantDefinitions,
   getVariantOptions,
   validateComponentSet,
   variantValues,
@@ -40,6 +43,7 @@ import {
   type VariantTransitionResult
 } from './model'
 import { addVariantValue, removeVariantValue } from './options'
+import { findOrBuildVariant, savedVariantValues } from './saved'
 
 export type {
   VariantConflict,
@@ -68,17 +72,24 @@ export function createVariantActions(ctx: EditorContext) {
     if (instance?.type !== 'INSTANCE' || component?.type !== 'COMPONENT' || !componentSetId) {
       return []
     }
-    const options =
-      collectVariantOptions(ctx.graph, componentSetId).get(propertyName) ?? new Set<string>()
-    return [...options].map((value) => ({
-      value,
-      available: Boolean(
-        findExactVariant(ctx.graph, componentSetId, {
-          ...variantValues(ctx.graph, componentSetId, component),
-          [propertyName]: value
-        })
+    const definitions = getVariantDefinitions(ctx.graph, componentSetId)
+    const saved = savedVariantValues(ctx.graph, componentSetId)
+    const unbuilt = saved.filter((variant) => !variant.built)
+    const options = uniq([
+      ...saved.flatMap(({ values }) => values[propertyName] || []),
+      ...(collectVariantOptions(ctx.graph, componentSetId).get(propertyName) ?? [])
+    ])
+    const current = variantValues(ctx.graph, componentSetId, component)
+    return options.map((value) => {
+      const requested = { ...current, [propertyName]: value }
+      const unbuiltMatch = unbuilt.some(({ values }) =>
+        definitions.every(({ name }) => values[name] === requested[name])
       )
-    }))
+      return {
+        value,
+        available: Boolean(findExactVariant(ctx.graph, componentSetId, requested)) || unbuiltMatch
+      }
+    })
   }
 
   function pushSwitchStep(change: DocumentChange) {
@@ -120,7 +131,7 @@ export function createVariantActions(ctx: EditorContext) {
       ...variantValues(ctx.graph, componentSetId, component),
       [propertyName]: newValue
     }
-    const target = findExactVariant(ctx.graph, componentSetId, requested)
+    const target = findOrBuildVariant(ctx.graph, componentSetId, requested)
     if (!target) return { kind: 'unavailable', requested }
 
     const previousBindings = { ...instance.variantBindings }
