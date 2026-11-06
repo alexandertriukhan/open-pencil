@@ -149,6 +149,10 @@ Execute JavaScript against the document using a Figma Plugin API-compatible runt
 ```bash
 openpencil eval design.fig -c 'figma.currentPage.findAll(n => n.type === "TEXT").length'
 
+# Large .fig files: prepare only the pages the script reads; the first is currentPage.
+# Other pages keep their metadata but their layers are not loaded for searches.
+openpencil eval design.fig --page "Home" --page "Components" -c 'figma.currentPage.children.length'
+
 # App mode — modifies the live document in the editor
 openpencil eval -c '
   const buttons = figma.currentPage.findAll(n => n.name === "Button");

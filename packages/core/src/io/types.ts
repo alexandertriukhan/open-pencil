@@ -22,6 +22,8 @@ export interface ReadDocumentInput {
   name?: string
   mimeType?: string
   data: Uint8Array
+  /** Initial page population for lazy formats such as `.fig`; first page by default. */
+  populate?: 'all' | 'first-page' | 'none'
   /**
    * Reads a file a document names relative to itself, such as a `.pen` document's images; null
    * when it cannot. Hosts that know where the document lives pass it.

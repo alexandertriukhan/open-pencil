@@ -2,7 +2,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { dirname, resolve, sep } from 'node:path'
 
 import type { SkiaRenderer } from '@open-pencil/core/canvas'
-import { BUILTIN_IO_FORMATS, IORegistry } from '@open-pencil/core/io'
+import { BUILTIN_IO_FORMATS, IORegistry, type ReadDocumentInput } from '@open-pencil/core/io'
 import { populateAllFigPages, populateFigPage } from '@open-pencil/core/io/formats/fig'
 import { headlessHTMLReader } from '@open-pencil/core/io/formats/html/import'
 import { headlessRenderer, initCanvasKit } from '@open-pencil/core/io/formats/raster'
@@ -42,7 +42,10 @@ function documentAssetReader(filePath: string) {
   }
 }
 
-export async function loadDocument(filePath: string): Promise<SceneGraph> {
+export async function loadDocument(
+  filePath: string,
+  options: Pick<ReadDocumentInput, 'populate'> = {}
+): Promise<SceneGraph> {
   const bytes = new Uint8Array(await readFile(filePath))
   // A format laid out as it is read places its layers by their text's size, which is measured
   // as an export draws it rather than estimated.
@@ -50,7 +53,8 @@ export async function loadDocument(filePath: string): Promise<SceneGraph> {
   const { graph } = await io.readDocument({
     name: filePath,
     data: bytes,
-    readAsset: documentAssetReader(filePath)
+    readAsset: documentAssetReader(filePath),
+    ...options
   })
   graph.applyDerivedLayoutDuring(() => computeAllLayouts(graph))
   return graph
@@ -84,12 +88,12 @@ export function measureTextHeadlessly(): Promise<SkiaRenderer> {
  * stand-in, and the edited layer comes out taller or wider than the app draws it. Returns which
  * of those fonts could not be loaded.
  */
-export async function measureDocumentText(graph: SceneGraph): Promise<DocumentFontStatus> {
+export async function measureDocumentText(
+  graph: SceneGraph,
+  pageIds: readonly string[] = graph.getPages(true).map((page) => page.id)
+): Promise<DocumentFontStatus> {
   await measureTextHeadlessly()
-  return prepareGraphFonts(
-    graph,
-    graph.getPages(true).map((page) => page.id)
-  )
+  return prepareGraphFonts(graph, pageIds)
 }
 
 /** `--write` and `--output` for commands that change a headless document. */

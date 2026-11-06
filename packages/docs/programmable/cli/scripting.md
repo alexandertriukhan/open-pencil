@@ -26,6 +26,19 @@ openpencil eval design.fig -c "
 "
 ```
 
+## Select pages in a file
+
+File mode populates and lays out every page before running the script by default. On a large `.fig` file, pass `--page` with an exact page name to prepare only that page. Repeat the option to prepare several pages; the first becomes `figma.currentPage`.
+
+```sh
+openpencil eval design.fig --page "Home" -c "return figma.currentPage.children.length"
+openpencil eval design.fig --page "Home" --page "Components" --stdin < inspect.js
+```
+
+The whole archive still has to be parsed. Unselected `.fig` pages remain unpopulated: their page records are available in `figma.root.children`, but their layers are absent from searches and synchronous node lookups. Select every page the script needs, including pages it switches to. An unknown page name fails before the script runs. Formats that load eagerly still read all their layers.
+
+`--write` and `--output` preserve the unselected pages in the original `.fig` archive. `--page` is for file mode; use `--page-id` to target a page in the running app.
+
 ## Variable formulas
 
 Use `openpencil.setVariableFormula(collectionName, variableName, source, modeName?)` to replace a variable's definition with a formula. It validates before changing the document and returns the resolved value. Omitting the mode name edits the collection's default mode.

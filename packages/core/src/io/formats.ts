@@ -195,7 +195,7 @@ export const figFormat: IOFormatAdapter<'fig'> = {
   },
   async readDocument(input) {
     const data = input.data.slice().buffer
-    const graph = await parseFigFile(data, { populate: 'first-page' })
+    const graph = await parseFigFile(data, { populate: input.populate ?? 'first-page' })
     return { graph, sourceFormat: 'fig' }
   },
   async writeDocument(graph, options?: FigWriteOptions, context?: IOContext) {
