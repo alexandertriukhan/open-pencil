@@ -1,0 +1,1 @@
+- A text range that names a fill style without its own paints, as an instance's override does, takes the style's paints, as in Figma.
